@@ -1,0 +1,275 @@
+---
+# Install Harness Delegate in ROSA cluster
+
+- name: Check if delegate already exists
+  k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ harness_delegate_name }}"
+    namespace: "{{ harness_delegate_namespace }}"
+  register: existing_delegate
+
+- name: Remove existing delegate if requested
+  k8s:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ harness_delegate_name }}"
+    namespace: "{{ harness_delegate_namespace }}"
+    state: absent
+  when: 
+    - remove_existing_delegate | bool
+    - existing_delegate.resources | length > 0
+
+- name: Create delegate ConfigMap
+  k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ harness_delegate_name }}-config"
+        namespace: "{{ harness_delegate_namespace }}"
+        labels:
+          app: harness-delegate
+          harness.io/name: "{{ harness_delegate_name }}"
+      data:
+        DELEGATE_NAME: "{{ harness_delegate_name }}"
+        ACCOUNT_ID: "{{ harness_account_id }}"
+        MANAGER_HOST_AND_PORT: "{{ harness_platform_url }}"
+        LOG_STREAMING_SERVICE_URL: "{{ harness_log_endpoint }}"
+        DELEGATE_TAGS: "{{ harness_delegate_tags }}"
+        DELEGATE_DESCRIPTION: "{{ harness_delegate_description }}"
+        DELEGATE_TYPE: "KUBERNETES"
+        DELEGATE_NAMESPACE: "{{ harness_delegate_namespace }}"
+        INIT_SCRIPT: |
+          echo "Initializing Harness Delegate"
+          echo "Environment: {{ environment }}"
+          echo "Cluster: {{ rosa_cluster_name }}"
+    state: present
+
+- name: Create delegate Secret
+  k8s:
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ harness_delegate_name }}-secret"
+        namespace: "{{ harness_delegate_namespace }}"
+        labels:
+          app: harness-delegate
+          harness.io/name: "{{ harness_delegate_name }}"
+      type: Opaque
+      data:
+        DELEGATE_TOKEN: "{{ harness_delegate_token | b64encode }}"
+    state: present
+  no_log: true
+
+- name: Deploy Harness Delegate
+  k8s:
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ harness_delegate_name }}"
+        namespace: "{{ harness_delegate_namespace }}"
+        labels:
+          app: harness-delegate
+          harness.io/name: "{{ harness_delegate_name }}"
+          environment: "{{ environment }}"
+      spec:
+        replicas: "{{ harness_delegate_replicas }}"
+        selector:
+          matchLabels:
+            app: harness-delegate
+            harness.io/name: "{{ harness_delegate_name }}"
+        template:
+          metadata:
+            labels:
+              app: harness-delegate
+              harness.io/name: "{{ harness_delegate_name }}"
+            annotations:
+              prometheus.io/scrape: "true"
+              prometheus.io/port: "3000"
+          spec:
+            serviceAccountName: "{{ harness_delegate_sa_name }}"
+            containers:
+            - name: delegate
+              image: "{{ harness_delegate_image }}"
+              imagePullPolicy: "{{ harness_delegate_image_pull_policy }}"
+              env:
+              - name: DELEGATE_NAME
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: DELEGATE_NAME
+              - name: ACCOUNT_ID
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: ACCOUNT_ID
+              - name: DELEGATE_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: "{{ harness_delegate_name }}-secret"
+                    key: DELEGATE_TOKEN
+              - name: MANAGER_HOST_AND_PORT
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: MANAGER_HOST_AND_PORT
+              - name: LOG_STREAMING_SERVICE_URL
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: LOG_STREAMING_SERVICE_URL
+              - name: DELEGATE_TAGS
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: DELEGATE_TAGS
+              - name: DELEGATE_DESCRIPTION
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: DELEGATE_DESCRIPTION
+              - name: DELEGATE_TYPE
+                value: "KUBERNETES"
+              - name: INIT_SCRIPT
+                valueFrom:
+                  configMapKeyRef:
+                    name: "{{ harness_delegate_name }}-config"
+                    key: INIT_SCRIPT
+              - name: DELEGATE_NAMESPACE
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+              - name: JAVA_OPTS
+                value: "-Xms512m -Xmx1024m"
+              resources:
+                requests:
+                  cpu: "{{ harness_delegate_cpu_request }}"
+                  memory: "{{ harness_delegate_memory_request }}"
+                limits:
+                  cpu: "{{ harness_delegate_cpu_limit }}"
+                  memory: "{{ harness_delegate_memory_limit }}"
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 3000
+                initialDelaySeconds: 120
+                periodSeconds: 60
+                timeoutSeconds: 10
+              readinessProbe:
+                httpGet:
+                  path: /health
+                  port: 3000
+                initialDelaySeconds: 60
+                periodSeconds: 30
+                timeoutSeconds: 10
+    state: present
+
+- name: Create delegate Service
+  k8s:
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ harness_delegate_name }}-service"
+        namespace: "{{ harness_delegate_namespace }}"
+        labels:
+          app: harness-delegate
+          harness.io/name: "{{ harness_delegate_name }}"
+      spec:
+        selector:
+          app: harness-delegate
+          harness.io/name: "{{ harness_delegate_name }}"
+        ports:
+        - name: metrics
+          port: 3000
+          targetPort: 3000
+    state: present
+
+- name: Create NetworkPolicy for delegate
+  k8s:
+    definition:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: "{{ harness_delegate_name }}-network-policy"
+        namespace: "{{ harness_delegate_namespace }}"
+        labels:
+          app: harness-delegate
+      spec:
+        podSelector:
+          matchLabels:
+            app: harness-delegate
+        policyTypes:
+        - Ingress
+        - Egress
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                name: "{{ item }}"
+          ports:
+          - protocol: TCP
+            port: 3000
+        egress:
+        - to:
+          - namespaceSelector: {}
+          ports:
+          - protocol: TCP
+            port: 443
+          - protocol: TCP
+            port: 80
+          - protocol: TCP
+            port: 6443  # Kubernetes API
+        - to:
+          - podSelector:
+              matchLabels:
+                app: harness-delegate
+    state: present
+  loop: "{{ allowed_namespaces }}"
+  when: enable_network_policies | bool
+
+- name: Wait for delegate deployment to be ready
+  k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ harness_delegate_name }}"
+    namespace: "{{ harness_delegate_namespace }}"
+  register: delegate_deployment
+  until: 
+    - delegate_deployment.resources[0].status.conditions is defined
+    - delegate_deployment.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | list | length > 0
+    - (delegate_deployment.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | first).status == "True"
+  retries: 30
+  delay: 10
+
+- name: Get delegate pod logs
+  k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ harness_delegate_namespace }}"
+    label_selectors:
+      - "app=harness-delegate"
+  register: delegate_pods
+
+- name: Check delegate connectivity
+  shell: |
+    oc logs -n {{ harness_delegate_namespace }} {{ delegate_pods.resources[0].metadata.name }} | tail -20
+  register: delegate_logs
+  when: delegate_pods.resources | length > 0
+
+- name: Display delegate status
+  debug:
+    msg: |
+      Delegate Installation Complete:
+      - Name: {{ harness_delegate_name }}
+      - Namespace: {{ harness_delegate_namespace }}
+      - Status: {{ delegate_deployment.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | first }}
+      - Replicas: {{ delegate_deployment.resources[0].status.readyReplicas }}/{{ delegate_deployment.resources[0].status.replicas }}
+      
+      To verify delegate registration:
+      1. Check Harness UI: Setup -> Delegates
+      2. Run: harness delegate list
+      3. Check logs: oc logs -n {{ harness_delegate_namespace }} -l app=harness-delegate

@@ -1,0 +1,160 @@
+---
+# Security Groups Creation Tasks (AWS CLI)
+# Dependencies: Requires VPC to exist
+
+- name: Load environment-specific configuration for security groups
+  include_vars: "../../environments/{{ target_environment }}/cf-db.yml"
+  tags:
+    - always
+    - cf-db
+    - security-groups
+    - security
+
+- name: Discover VPC ID if not set for security groups
+  shell: |
+    aws ec2 describe-vpcs \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=cidr-block,Values={{ cf_db_config.vpc_cidr }}" "Name=state,Values=available" \
+      --query 'Vpcs[0].VpcId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: discovered_vpc_result_sg
+  when: cf_db_config.vpc_id == ""
+  failed_when: false
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Set working VPC ID fact for security groups
+  set_fact:
+    working_vpc_id_sg: "{{ cf_db_config.vpc_id if cf_db_config.vpc_id != '' else (cf_db_created_vpc_id if cf_db_created_vpc_id is defined else discovered_vpc_result_sg.stdout) }}"
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Validate VPC exists for security group creation
+  assert:
+    that:
+      - working_vpc_id_sg is defined
+      - working_vpc_id_sg != ""
+      - working_vpc_id_sg != "None"
+    fail_msg: "VPC ID is required for security group creation. Found: {{ working_vpc_id_sg | default('undefined') }}"
+    success_msg: "Security group dependencies validated. Using VPC: {{ working_vpc_id_sg }}"
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Check if security group already exists
+  shell: |
+    aws ec2 describe-security-groups \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=group-name,Values={{ cf_db_config.security_group.name }}" "Name=vpc-id,Values={{ working_vpc_id_sg }}" \
+      --query 'SecurityGroups[0].GroupId' \
+      --output text
+  register: existing_sg_check
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Create Security Group for Aurora DB (Cross-VPC Access)
+  shell: |
+    aws ec2 create-security-group \
+      --region {{ cf_db_config.region }} \
+      --group-name "{{ cf_db_config.security_group.name }}" \
+      --description "{{ cf_db_config.security_group.description }}" \
+      --vpc-id {{ working_vpc_id_sg }} \
+      --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value={{ cf_db_config.security_group.name }}},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=Component,Value={{ cf_db_config.common_tags.Component }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'GroupId' \
+      --output text
+  register: aurora_sg_result
+  when: existing_sg_check.stdout == "None" or existing_sg_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Set Aurora security group fact
+  set_fact:
+    aurora_sg:
+      group_id: "{{ existing_sg_check.stdout if existing_sg_check.stdout != 'None' and existing_sg_check.stdout != '' else aurora_sg_result.stdout }}"
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Check existing ingress rules for CIDR blocks
+  shell: |
+    aws ec2 describe-security-groups \
+      --region {{ cf_db_config.region }} \
+      --group-ids {{ aurora_sg.group_id }} \
+      --query 'SecurityGroups[0].IpPermissions[?FromPort==`{{ cf_db_config.security_group.db_port }}`].IpRanges[].CidrIp' \
+      --output text
+  register: existing_cidr_rules
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Add ingress rules for cross-VPC access
+  shell: |
+    aws ec2 authorize-security-group-ingress \
+      --region {{ cf_db_config.region }} \
+      --group-id {{ aurora_sg.group_id }} \
+      --protocol tcp \
+      --port {{ cf_db_config.security_group.db_port }} \
+      --cidr {{ item }}
+  loop: "{{ cf_db_config.security_group.allowed_cidrs }}"
+  when: item not in existing_cidr_rules.stdout
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Add OpenShift security group rule (if available)
+  shell: |
+    aws ec2 authorize-security-group-ingress \
+      --region {{ cf_db_config.region }} \
+      --group-id {{ aurora_sg.group_id }} \
+      --protocol tcp \
+      --port {{ cf_db_config.security_group.db_port }} \
+      --source-group {{ cf_db_config.openshift_sg_id }}
+  when: 
+    - cf_db_config.openshift_sg_id is defined 
+    - cf_db_config.openshift_sg_id != ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - security-groups
+    - security
+
+- name: Display Aurora security group information
+  debug:
+    msg:
+      - "Created Aurora DB security group with ID: {{ aurora_sg.group_id }}"
+      - "Security group allows cross-VPC access from:"
+      - "  - Aurora VPC CIDR: {{ cf_db_config.security_group.allowed_cidrs | join(', ') }}"
+      - "  - OpenShift security group: {{ cf_db_config.openshift_sg_id | default('Not configured (optional)') }}"
+      - "Database will be accessible from ROSA clusters in other VPCs"
+  tags:
+    - cf-db
+    - security-groups
+    - security

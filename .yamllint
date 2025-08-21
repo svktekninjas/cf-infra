@@ -1,0 +1,118 @@
+---
+# YAML Lint Configuration
+# Ensures consistent YAML formatting across the project
+
+extends: default
+
+rules:
+  # Line length - allow longer lines for Ansible
+  line-length:
+    max: 160
+    level: warning
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+
+  # Comments
+  comments:
+    min-spaces-from-content: 1
+    require-starting-space: true
+  comments-indentation: disable  # Ansible uses varied comment indentation
+
+  # Braces and brackets
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+
+  # Indentation
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+    check-multi-line-strings: false
+
+  # Empty lines
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+  # Keys
+  key-duplicates: enable
+  key-ordering: disable  # Ansible doesn't require key ordering
+
+  # Trailing spaces
+  trailing-spaces: enable
+
+  # New lines
+  new-line-at-end-of-file: enable
+  new-lines:
+    type: unix
+
+  # Truthy values - Allow Ansible-style booleans
+  truthy:
+    allowed-values:
+      - 'true'
+      - 'false'
+      - 'yes'
+      - 'no'
+      - 'True'
+      - 'False'
+      - 'YES'
+      - 'NO'
+    check-keys: false
+
+  # Octal values
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: false  # Allow 0o755 format
+
+  # Quoted strings
+  quoted-strings:
+    quote-type: any
+    required: false
+    extra-required: []
+    extra-allowed: []
+
+  # Document markers
+  document-start: disable  # Optional for Ansible
+  document-end: disable
+
+  # Hyphens
+  hyphens:
+    max-spaces-after: 1
+
+  # Colons
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  # Commas
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+
+# File patterns to check
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  - '.yamllint'
+
+# Ignore paths
+ignore: |
+  .cache/
+  .github/workflows/
+  molecule/
+  venv/
+  .venv/
+  env/
+  .env/
+  node_modules/
+  .tox/
+  .git/

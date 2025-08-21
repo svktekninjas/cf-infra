@@ -1,0 +1,136 @@
+# Monitor ROSA cluster creation status
+---
+- name: "Load environment-specific cluster configuration"
+  include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Set full cluster name"
+  set_fact:
+    full_cluster_name: "{{ cluster_name_prefix }}-{{ target_environment }}"
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Check initial cluster state"
+  shell: rosa describe cluster -c {{ full_cluster_name }} --output json
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: initial_cluster_status
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Display cluster creation information"
+  debug:
+    msg:
+      - "🚀 Cluster '{{ full_cluster_name }}' creation initiated successfully!"
+      - "📊 Current Status: {{ (initial_cluster_status.stdout | from_json).state | default('installing') }}"
+      - "⏳ ROSA clusters typically take 30-40 minutes to fully provision"
+      - ""
+      - "🔍 Monitor cluster status manually:"
+      - "    watch -n 60 'rosa describe cluster -c {{ full_cluster_name }} | grep State'"
+      - ""
+      - "⏱️  Automated monitoring will run for {{ cluster_creation_timeout_minutes | default(60) }} minutes"
+      - "    (checking every 60 seconds)"
+  when: initial_cluster_status.rc == 0
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Monitor cluster creation status"
+  shell: rosa describe cluster -c {{ full_cluster_name }} --output json
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_status_check
+  until: 
+    - cluster_status_check.rc == 0
+    - (cluster_status_check.stdout | from_json).state in ['ready', 'error']
+  retries: "{{ cluster_creation_timeout_minutes | default(60) }}"
+  delay: 60
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Parse cluster status"
+  set_fact:
+    current_cluster_state: "{{ (cluster_status_check.stdout | from_json).state | default('unknown') }}"
+    cluster_status_message: "{{ (cluster_status_check.stdout | from_json).status.description | default('Cluster installation in progress') }}"
+  when: cluster_status_check.rc == 0
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Handle cluster creation error"
+  fail:
+    msg:
+      - "❌ Cluster creation failed!"
+      - "State: {{ current_cluster_state }}"
+      - "Error: {{ cluster_status_message }}"
+      - "Run 'rosa logs install -c {{ full_cluster_name }}' to see installation logs"
+  when: current_cluster_state == 'error'
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Get final cluster information"
+  shell: rosa describe cluster -c {{ full_cluster_name }} --output json
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: final_cluster_info
+  changed_when: false
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Extract cluster endpoints and details"
+  set_fact:
+    cluster_api_url: "{{ (final_cluster_info.stdout | from_json).api.url }}"
+    cluster_console_url: "{{ (final_cluster_info.stdout | from_json).console.url }}"
+    cluster_state: "{{ (final_cluster_info.stdout | from_json).state }}"
+    cluster_version: "{{ (final_cluster_info.stdout | from_json).version.raw_id }}"
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Display cluster ready status"
+  debug:
+    msg:
+      - "🎉 ROSA cluster is ready!"
+      - "  - Cluster name: {{ full_cluster_name }}"
+      - "  - State: {{ cluster_state }}"
+      - "  - Version: {{ cluster_version }}"
+      - "  - API URL: {{ cluster_api_url }}"
+      - "  - Console URL: {{ cluster_console_url }}"
+      - "  - Region: {{ aws_region }}"
+  when: cluster_state == "ready"
+  tags:
+    - cluster
+    - cluster-monitor
+
+- name: "Display timeout message if cluster not ready"
+  debug:
+    msg:
+      - "⏰ Monitoring timeout reached after {{ cluster_creation_timeout_minutes | default(60) }} minutes"
+      - "📋 Current Status: {{ cluster_state | default('installing') }}"
+      - "ℹ️  This is normal - cluster may still be installing"
+      - ""
+      - "🔍 Continue monitoring manually:"
+      - "    watch -n 60 'rosa describe cluster -c {{ full_cluster_name }} | grep State'"
+      - ""
+      - "📜 View installation logs:"
+      - "    rosa logs install -c {{ full_cluster_name }} --watch"
+      - ""
+      - "🔄 Resume monitoring with this playbook:"
+      - "    ansible-playbook playbooks/main.yml --tags cluster-monitor -e 'target_environment={{ target_environment }}' -e 'cluster_creation_timeout_minutes=60'"
+  when: 
+    - cluster_state is defined
+    - cluster_state not in ['ready', 'error']
+  tags:
+    - cluster
+    - cluster-monitor

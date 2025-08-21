@@ -1,0 +1,777 @@
+---
+# CF-DB Role Cleanup Tasks
+# This file systematically removes all Aurora DB resources and associated network infrastructure
+# Usage: ansible-playbook playbook.yml -t db-cleanup -e target_environment=dev
+# WARNING: This will permanently delete all database resources - use with caution!
+
+- name: Display cleanup warning and summary
+  debug:
+    msg:
+      - "⚠️  === CF-DB CLEANUP WARNING === ⚠️"
+      - "This will PERMANENTLY DELETE all database resources:"
+      - "Environment: {{ cf_db_config.common_tags.Environment }}"
+      - "Region: {{ cf_db_config.region }}"
+      - "VPC ID: {{ cf_db_config.vpc_id }}"
+      - "Aurora Cluster: {{ cf_db_config.database.cluster_name }}"
+      - "Database Instances: {{ cf_db_config.database.instances | length }}"
+      - "Private Subnets: {{ cf_db_config.private_subnets | length }}"
+      - "VPC Peering: {{ 'Enabled' if cf_db_config.vpc_peering.enabled | default(false) else 'Disabled' }}"
+      - ""
+      - "Resources to be deleted:"
+      - "1. Aurora DB instances and cluster"
+      - "2. DB subnet group"
+      - "3. Security groups"
+      - "4. VPC peering connection (if exists)"
+      - "5. NAT Gateway and EIP"
+      - "6. Private subnets"
+      - "7. Route tables"
+      - "====================================="
+  tags:
+    - always
+
+- name: Confirm cleanup execution
+  pause:
+    prompt: |
+      
+      ⚠️  DANGER ZONE ⚠️
+      
+      You are about to PERMANENTLY DELETE all Aurora database resources!
+      This action CANNOT be undone and will result in DATA LOSS.
+      
+      Type 'DELETE' (in capitals) to confirm destruction, or press Ctrl+C to cancel
+  register: cleanup_confirmation
+  when: cf_db_cleanup_confirmation is not defined
+  tags:
+    - always
+
+- name: Validate cleanup confirmation
+  fail:
+    msg: "Cleanup cancelled - confirmation not provided or incorrect"
+  when: 
+    - cf_db_cleanup_confirmation is not defined
+    - cleanup_confirmation.user_input != "DELETE"
+  tags:
+    - always
+
+- name: Set AWS profile environment
+  set_fact:
+    ansible_env_aws_profile: "{{ cf_db_config.profile }}"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - always
+
+# Phase 1: Delete Aurora Database Resources
+- name: Phase 1 - Delete Aurora Database Resources
+  block:
+    - name: Find Aurora DB instances with cf tags
+      shell: |
+        aws rds describe-db-instances \
+          --region {{ cf_db_config.region }} \
+          --query 'DBInstances[?starts_with(DBInstanceIdentifier, `cf`)].DBInstanceIdentifier' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_instances_found
+      failed_when: false
+
+    - name: Display found Aurora DB instances
+      debug:
+        msg: "{{ 'Found Aurora instances with cf tags: ' + cf_instances_found.stdout if (cf_instances_found.stdout != 'NOT_FOUND' and cf_instances_found.stdout != '') else 'No Aurora instances with cf tags found' }}"
+
+    - name: Delete Aurora DB instances with cf tags
+      shell: |
+        aws rds delete-db-instance \
+          --region {{ cf_db_config.region }} \
+          --db-instance-identifier {{ item }} \
+          --skip-final-snapshot \
+          --delete-automated-backups \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_instances_found.stdout.split() }}"
+      register: delete_instances_results
+      failed_when: false
+      when: 
+        - cf_instances_found.stdout != "NOT_FOUND"
+        - cf_instances_found.stdout != ""
+        - cf_instances_found.stdout != "None"
+
+    - name: Wait for Aurora instances to be deleted
+      shell: |
+        aws rds describe-db-instances \
+          --region {{ cf_db_config.region }} \
+          --db-instance-identifier {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_instances_found.stdout.split() }}"
+      register: instance_deletion_status
+      until: instance_deletion_status.rc != 0
+      retries: 30
+      delay: 30
+      failed_when: false
+      when: 
+        - cf_instances_found.stdout != "NOT_FOUND"
+        - cf_instances_found.stdout != ""
+        - cf_instances_found.stdout != "None"
+
+    - name: Find Aurora DB clusters with cf tags
+      shell: |
+        aws rds describe-db-clusters \
+          --region {{ cf_db_config.region }} \
+          --query 'DBClusters[?starts_with(DBClusterIdentifier, `cf`)].DBClusterIdentifier' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_clusters_found
+      failed_when: false
+
+    - name: Display found Aurora DB clusters
+      debug:
+        msg: "{{ 'Found Aurora clusters with cf tags: ' + cf_clusters_found.stdout if (cf_clusters_found.stdout != 'NOT_FOUND' and cf_clusters_found.stdout != '') else 'No Aurora clusters with cf tags found' }}"
+
+    - name: Delete Aurora DB clusters with cf tags
+      shell: |
+        aws rds delete-db-cluster \
+          --region {{ cf_db_config.region }} \
+          --db-cluster-identifier {{ item }} \
+          --skip-final-snapshot \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_clusters_found.stdout.split() }}"
+      register: delete_cluster_results
+      failed_when: false
+      when: 
+        - cf_clusters_found.stdout != "NOT_FOUND"
+        - cf_clusters_found.stdout != ""
+        - cf_clusters_found.stdout != "None"
+
+    - name: Wait for Aurora clusters to be deleted
+      shell: |
+        aws rds describe-db-clusters \
+          --region {{ cf_db_config.region }} \
+          --db-cluster-identifier {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_clusters_found.stdout.split() }}"
+      register: cluster_deletion_status
+      until: cluster_deletion_status.rc != 0
+      retries: 30
+      delay: 30
+      failed_when: false
+      when: 
+        - cf_clusters_found.stdout != "NOT_FOUND"
+        - cf_clusters_found.stdout != ""
+        - cf_clusters_found.stdout != "None"
+
+    - name: Find DB subnet groups with cf tags
+      shell: |
+        aws rds describe-db-subnet-groups \
+          --region {{ cf_db_config.region }} \
+          --query 'DBSubnetGroups[?starts_with(DBSubnetGroupName, `cf`)].DBSubnetGroupName' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_subnet_groups_found
+      failed_when: false
+
+    - name: Display found DB subnet groups
+      debug:
+        msg: "{{ 'Found DB subnet groups with cf tags: ' + cf_subnet_groups_found.stdout if (cf_subnet_groups_found.stdout != 'NOT_FOUND' and cf_subnet_groups_found.stdout != '') else 'No DB subnet groups with cf tags found' }}"
+
+    - name: Delete DB subnet groups with cf tags
+      shell: |
+        aws rds delete-db-subnet-group \
+          --region {{ cf_db_config.region }} \
+          --db-subnet-group-name {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_subnet_groups_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_subnet_groups_found.stdout != "NOT_FOUND"
+        - cf_subnet_groups_found.stdout != ""
+        - cf_subnet_groups_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-database
+
+# Phase 2: Delete VPC Peering Resources
+- name: Phase 2 - Delete VPC Peering Resources
+  block:
+    - name: Find VPC peering connections with cf tags
+      shell: |
+        aws ec2 describe-vpc-peering-connections \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'VpcPeeringConnections[?Status.Code!=`deleted`].VpcPeeringConnectionId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_vpc_peering_found
+      failed_when: false
+
+    - name: Display found VPC peering connections
+      debug:
+        msg: "{{ 'Found VPC peering connections with cf tags: ' + cf_vpc_peering_found.stdout if (cf_vpc_peering_found.stdout != 'NOT_FOUND' and cf_vpc_peering_found.stdout != '') else 'No VPC peering connections with cf tags found' }}"
+
+    - name: Delete VPC peering connections with cf tags
+      shell: |
+        aws ec2 delete-vpc-peering-connection \
+          --region {{ cf_db_config.region }} \
+          --vpc-peering-connection-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_vpc_peering_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_vpc_peering_found.stdout != "NOT_FOUND"
+        - cf_vpc_peering_found.stdout != ""
+        - cf_vpc_peering_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-vpc-peering
+
+# Phase 3: Delete Security Groups
+- name: Phase 3 - Delete Security Groups
+  block:
+    - name: Find security groups with cf tags
+      shell: |
+        aws ec2 describe-security-groups \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=group-name,Values=cf*" \
+          --query 'SecurityGroups[].GroupId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_security_groups_found
+      failed_when: false
+
+    - name: Display found security groups
+      debug:
+        msg: "{{ 'Found security groups with cf tags: ' + cf_security_groups_found.stdout if (cf_security_groups_found.stdout != 'NOT_FOUND' and cf_security_groups_found.stdout != '') else 'No security groups with cf tags found' }}"
+
+    - name: Delete security groups with cf tags
+      shell: |
+        aws ec2 delete-security-group \
+          --region {{ cf_db_config.region }} \
+          --group-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_security_groups_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_security_groups_found.stdout != "NOT_FOUND"
+        - cf_security_groups_found.stdout != ""
+        - cf_security_groups_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-security-groups
+
+# Phase 3a: Delete Public Subnets
+- name: Phase 3a - Delete Public Subnets  
+  block:
+    - name: Find public subnets with cf tags
+      shell: |
+        aws ec2 describe-subnets \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'Subnets[].SubnetId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_public_subnets_found
+      failed_when: false
+
+    - name: Display found public subnets
+      debug:
+        msg: "{{ 'Found public subnets with cf tags: ' + cf_public_subnets_found.stdout if (cf_public_subnets_found.stdout != 'NOT_FOUND' and cf_public_subnets_found.stdout != '') else 'No public subnets with cf tags found' }}"
+
+    - name: Delete public subnets with cf tags
+      shell: |
+        aws ec2 delete-subnet \
+          --region {{ cf_db_config.region }} \
+          --subnet-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_public_subnets_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_public_subnets_found.stdout != "NOT_FOUND"
+        - cf_public_subnets_found.stdout != ""
+        - cf_public_subnets_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-public-subnets
+
+# Phase 4: Delete NAT Gateway and EIP
+- name: Phase 4 - Delete NAT Gateway and EIP
+  block:
+    - name: Find NAT gateways with cf tags
+      shell: |
+        aws ec2 describe-nat-gateways \
+          --region {{ cf_db_config.region }} \
+          --filter "Name=tag:Name,Values=cf*" \
+          --query 'NatGateways[?State!=`deleted`].NatGatewayId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_nat_gateways_found
+      failed_when: false
+
+    - name: Display found NAT gateways
+      debug:
+        msg: "{{ 'Found NAT gateways with cf tags: ' + cf_nat_gateways_found.stdout if (cf_nat_gateways_found.stdout != 'NOT_FOUND' and cf_nat_gateways_found.stdout != '') else 'No NAT gateways with cf tags found' }}"
+
+    - name: Get EIP allocation IDs for cf NAT gateways
+      shell: |
+        aws ec2 describe-nat-gateways \
+          --region {{ cf_db_config.region }} \
+          --nat-gateway-ids {{ item }} \
+          --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      loop: "{{ cf_nat_gateways_found.stdout.split() }}"
+      register: cf_nat_eip_allocations
+      failed_when: false
+      when: 
+        - cf_nat_gateways_found.stdout != "NOT_FOUND"
+        - cf_nat_gateways_found.stdout != ""
+        - cf_nat_gateways_found.stdout != "None"
+
+    - name: Delete NAT gateways with cf tags
+      shell: |
+        aws ec2 delete-nat-gateway \
+          --region {{ cf_db_config.region }} \
+          --nat-gateway-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_nat_gateways_found.stdout.split() }}"
+      register: nat_delete_results
+      failed_when: false
+      when: 
+        - cf_nat_gateways_found.stdout != "NOT_FOUND"
+        - cf_nat_gateways_found.stdout != ""
+        - cf_nat_gateways_found.stdout != "None"
+
+    - name: Wait for NAT gateways to be deleted
+      shell: |
+        aws ec2 describe-nat-gateways \
+          --region {{ cf_db_config.region }} \
+          --nat-gateway-ids {{ item }} \
+          --query 'NatGateways[0].State' \
+          --output text \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_nat_gateways_found.stdout.split() }}"
+      register: nat_deletion_status
+      until: nat_deletion_status.stdout == "deleted" or nat_deletion_status.rc != 0
+      retries: 20
+      delay: 30
+      failed_when: false
+      when: 
+        - cf_nat_gateways_found.stdout != "NOT_FOUND"
+        - cf_nat_gateways_found.stdout != ""
+        - cf_nat_gateways_found.stdout != "None"
+
+    - name: Release Elastic IPs for deleted NAT gateways
+      shell: |
+        aws ec2 release-address \
+          --region {{ cf_db_config.region }} \
+          --allocation-id {{ item.stdout }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_nat_eip_allocations.results | default([]) }}"
+      failed_when: false
+      when: 
+        - cf_nat_eip_allocations is defined
+        - item.stdout is defined
+        - item.stdout != "NOT_FOUND"
+        - item.stdout != ""
+        - item.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-nat-gateway
+
+# Phase 5: Delete Private Subnets
+- name: Phase 5 - Delete Private Subnets
+  block:
+    - name: Find private subnets with cf tags
+      shell: |
+        aws ec2 describe-subnets \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_private_subnets_found
+      failed_when: false
+
+    - name: Display found private subnets
+      debug:
+        msg: "{{ 'Found private subnets with cf tags: ' + cf_private_subnets_found.stdout if (cf_private_subnets_found.stdout != 'NOT_FOUND' and cf_private_subnets_found.stdout != '') else 'No private subnets with cf tags found' }}"
+
+    - name: Delete private subnets with cf tags
+      shell: |
+        aws ec2 delete-subnet \
+          --region {{ cf_db_config.region }} \
+          --subnet-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_private_subnets_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_private_subnets_found.stdout != "NOT_FOUND"
+        - cf_private_subnets_found.stdout != ""
+        - cf_private_subnets_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-subnets
+
+# Phase 6: Delete Route Tables
+- name: Phase 6 - Delete Route Tables
+  block:
+    - name: Find route tables with cf tags
+      shell: |
+        aws ec2 describe-route-tables \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'RouteTables[].RouteTableId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_route_tables_found
+      failed_when: false
+
+    - name: Display found route tables
+      debug:
+        msg: "{{ 'Found route tables with cf tags: ' + cf_route_tables_found.stdout if (cf_route_tables_found.stdout != 'NOT_FOUND' and cf_route_tables_found.stdout != '') else 'No route tables with cf tags found' }}"
+
+    - name: Delete route tables with cf tags
+      shell: |
+        aws ec2 delete-route-table \
+          --region {{ cf_db_config.region }} \
+          --route-table-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_route_tables_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_route_tables_found.stdout != "NOT_FOUND"
+        - cf_route_tables_found.stdout != ""
+        - cf_route_tables_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-route-tables
+
+# Phase 7: Delete Internet Gateways and EIPs
+- name: Phase 7 - Delete Internet Gateways and EIPs
+  block:
+    - name: Find internet gateways with cf tags
+      shell: |
+        aws ec2 describe-internet-gateways \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'InternetGateways[].InternetGatewayId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_igws_found
+      failed_when: false
+
+    - name: Display found internet gateways
+      debug:
+        msg: "{{ 'Found internet gateways with cf tags: ' + cf_igws_found.stdout if (cf_igws_found.stdout != 'NOT_FOUND' and cf_igws_found.stdout != '') else 'No internet gateways with cf tags found' }}"
+
+    - name: Get VPC attachments for cf internet gateways
+      shell: |
+        aws ec2 describe-internet-gateways \
+          --region {{ cf_db_config.region }} \
+          --internet-gateway-ids {{ item }} \
+          --query 'InternetGateways[0].Attachments[0].VpcId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      loop: "{{ cf_igws_found.stdout.split() }}"
+      register: cf_igw_vpc_attachments
+      failed_when: false
+      when: 
+        - cf_igws_found.stdout != "NOT_FOUND"
+        - cf_igws_found.stdout != ""
+        - cf_igws_found.stdout != "None"
+
+    - name: Find unattached EIPs with cf tags
+      shell: |
+        aws ec2 describe-addresses \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'Addresses[?AssociationId==null].AllocationId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_unattached_eips_found
+      failed_when: false
+
+    - name: Display found unattached EIPs
+      debug:
+        msg: "{{ 'Found unattached EIPs with cf tags: ' + cf_unattached_eips_found.stdout if (cf_unattached_eips_found.stdout != 'NOT_FOUND' and cf_unattached_eips_found.stdout != '') else 'No unattached EIPs with cf tags found' }}"
+
+    - name: Release unattached EIPs with cf tags
+      shell: |
+        aws ec2 release-address \
+          --region {{ cf_db_config.region }} \
+          --allocation-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_unattached_eips_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_unattached_eips_found.stdout != "NOT_FOUND"
+        - cf_unattached_eips_found.stdout != ""
+        - cf_unattached_eips_found.stdout != "None"
+
+    - name: Detach internet gateways from VPCs
+      shell: |
+        aws ec2 detach-internet-gateway \
+          --region {{ cf_db_config.region }} \
+          --internet-gateway-id {{ item.item }} \
+          --vpc-id {{ item.stdout }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_igw_vpc_attachments.results | default([]) }}"
+      failed_when: false
+      when: 
+        - cf_igw_vpc_attachments is defined
+        - item.stdout is defined
+        - item.stdout != "NOT_FOUND"
+        - item.stdout != ""
+        - item.stdout != "None"
+
+    - name: Delete internet gateways with cf tags
+      shell: |
+        aws ec2 delete-internet-gateway \
+          --region {{ cf_db_config.region }} \
+          --internet-gateway-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_igws_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_igws_found.stdout != "NOT_FOUND"
+        - cf_igws_found.stdout != ""
+        - cf_igws_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-igw
+
+# Phase 8: Delete VPCs
+- name: Phase 8 - Delete VPCs
+  block:
+    - name: Find VPCs with cf tags
+      shell: |
+        aws ec2 describe-vpcs \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'Vpcs[].VpcId' \
+          --output text \
+          --profile {{ cf_db_config.profile }} 2>/dev/null || echo "NOT_FOUND"
+      register: cf_vpcs_found
+      failed_when: false
+
+    - name: Display found VPCs
+      debug:
+        msg: "{{ 'Found VPCs with cf tags: ' + cf_vpcs_found.stdout if (cf_vpcs_found.stdout != 'NOT_FOUND' and cf_vpcs_found.stdout != '') else 'No VPCs with cf tags found' }}"
+
+    - name: Delete VPCs with cf tags
+      shell: |
+        aws ec2 delete-vpc \
+          --region {{ cf_db_config.region }} \
+          --vpc-id {{ item }} \
+          --profile {{ cf_db_config.profile }}
+      loop: "{{ cf_vpcs_found.stdout.split() }}"
+      failed_when: false
+      when: 
+        - cf_vpcs_found.stdout != "NOT_FOUND"
+        - cf_vpcs_found.stdout != ""
+        - cf_vpcs_found.stdout != "None"
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - db-cleanup
+    - cleanup-vpc
+
+# Phase 9: Cleanup Summary and Verification
+- name: Phase 9 - Cleanup Verification and Summary
+  block:
+    - name: Check for remaining Aurora DB clusters with cf tags
+      shell: |
+        aws rds describe-db-clusters \
+          --region {{ cf_db_config.region }} \
+          --query 'DBClusters[?starts_with(DBClusterIdentifier, `cf`)][DBClusterIdentifier,Status,Engine]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_clusters
+      failed_when: false
+
+    - name: Check for remaining Aurora DB instances with cf tags
+      shell: |
+        aws rds describe-db-instances \
+          --region {{ cf_db_config.region }} \
+          --query 'DBInstances[?starts_with(DBInstanceIdentifier, `cf`)][DBInstanceIdentifier,DBInstanceStatus,Engine]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_instances
+      failed_when: false
+
+    - name: Check for remaining DB subnet groups with cf tags
+      shell: |
+        aws rds describe-db-subnet-groups \
+          --region {{ cf_db_config.region }} \
+          --query 'DBSubnetGroups[?starts_with(DBSubnetGroupName, `cf`)][DBSubnetGroupName,VpcId]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_subnet_groups
+      failed_when: false
+
+    - name: Check for remaining VPC resources with cf tags
+      shell: |
+        aws ec2 describe-vpcs \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'Vpcs[*][VpcId,Tags[?Key==`Name`].Value|[0],State]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_vpcs
+      failed_when: false
+
+    - name: Check for remaining subnets with cf tags
+      shell: |
+        aws ec2 describe-subnets \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'Subnets[*][SubnetId,Tags[?Key==`Name`].Value|[0],VpcId,State]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_subnets
+      failed_when: false
+
+    - name: Check for remaining security groups with cf tags
+      shell: |
+        aws ec2 describe-security-groups \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=group-name,Values=cf*" \
+          --query 'SecurityGroups[*][GroupId,GroupName,VpcId]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_security_groups
+      failed_when: false
+
+    - name: Check for remaining NAT gateways with cf tags
+      shell: |
+        aws ec2 describe-nat-gateways \
+          --region {{ cf_db_config.region }} \
+          --filter "Name=tag:Name,Values=cf*" \
+          --query 'NatGateways[?State!=`deleted`][NatGatewayId,Tags[?Key==`Name`].Value|[0],State,VpcId]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_nat_gateways
+      failed_when: false
+
+    - name: Check for remaining route tables with cf tags
+      shell: |
+        aws ec2 describe-route-tables \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'RouteTables[*][RouteTableId,Tags[?Key==`Name`].Value|[0],VpcId]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_route_tables
+      failed_when: false
+
+    - name: Check for remaining VPC peering connections with cf tags
+      shell: |
+        aws ec2 describe-vpc-peering-connections \
+          --region {{ cf_db_config.region }} \
+          --filters "Name=tag:Name,Values=cf*" \
+          --query 'VpcPeeringConnections[?Status.Code!=`deleted`][VpcPeeringConnectionId,Tags[?Key==`Name`].Value|[0],Status.Code]' \
+          --output table \
+          --profile {{ cf_db_config.profile }}
+      register: remaining_vpc_peering
+      failed_when: false
+
+    - name: Display validation results
+      debug:
+        msg:
+          - "🔍 === CLEANUP VALIDATION RESULTS === 🔍"
+          - ""
+          - "Checking for remaining resources with 'cf' tags in {{ cf_db_config.region }}:"
+          - ""
+          - "📊 Aurora DB Clusters:"
+          - "{{ remaining_clusters.stdout_lines | default(['No clusters found']) | join('\n') }}"
+          - ""
+          - "📊 Aurora DB Instances:"
+          - "{{ remaining_instances.stdout_lines | default(['No instances found']) | join('\n') }}"
+          - ""
+          - "📊 DB Subnet Groups:"
+          - "{{ remaining_subnet_groups.stdout_lines | default(['No subnet groups found']) | join('\n') }}"
+          - ""
+          - "📊 VPCs:"
+          - "{{ remaining_vpcs.stdout_lines | default(['No VPCs found']) | join('\n') }}"
+          - ""
+          - "📊 Subnets:"
+          - "{{ remaining_subnets.stdout_lines | default(['No subnets found']) | join('\n') }}"
+          - ""
+          - "📊 Security Groups:"
+          - "{{ remaining_security_groups.stdout_lines | default(['No security groups found']) | join('\n') }}"
+          - ""
+          - "📊 NAT Gateways:"
+          - "{{ remaining_nat_gateways.stdout_lines | default(['No NAT gateways found']) | join('\n') }}"
+          - ""
+          - "📊 Route Tables:"
+          - "{{ remaining_route_tables.stdout_lines | default(['No route tables found']) | join('\n') }}"
+          - ""
+          - "📊 VPC Peering Connections:"
+          - "{{ remaining_vpc_peering.stdout_lines | default(['No VPC peering connections found']) | join('\n') }}"
+          - ""
+          - "==================================================="
+
+    - name: Display cleanup completion summary
+      debug:
+        msg:
+          - "🗑️  === CF-DB CLEANUP COMPLETED === 🗑️"
+          - "Environment: {{ cf_db_config.common_tags.Environment }}"
+          - "Region: {{ cf_db_config.region }}"
+          - ""
+          - "✅ Deleted Resources:"
+          - "   • Aurora cluster: {{ cf_db_config.database.cluster_name }}"
+          - "   • DB instances: {{ cf_db_config.database.instances | length }}"
+          - "   • DB subnet group: {{ cf_db_config.db_subnet_group.name }}"
+          - "   • Security group: {{ cf_db_config.security_group.name }}"
+          - "   • Private subnets: {{ cf_db_config.private_subnets | length }}"
+          - "   • Route table: {{ cf_db_config.route_table.name }}"
+          - "   • NAT Gateway and EIP"
+          - "   • VPC peering: Enabled"
+          - ""
+          - "⚠️  Resources Preserved:"
+          - "   • Main VPC: {{ cf_db_config.vpc_id }} (untouched)"
+          - "   • Public subnet: {{ cf_db_config.public_subnet_id }} (untouched)"
+          - "   • ROSA cluster resources (untouched)"
+          - ""
+          - "📋 Next Steps:"
+          - "   1. Verify no orphaned AWS resources remain"
+          - "   2. Update application configurations to remove DB references"
+          - "   3. Clean up any remaining DNS entries"
+          - "   4. Review AWS billing for cost confirmation"
+          - "================================="
+
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - always
+
+# Cleanup execution notes:
+# Full cleanup:        ansible-playbook playbook.yml -t db-cleanup -e target_environment=dev
+# With confirmation:   ansible-playbook playbook.yml -t db-cleanup -e target_environment=dev -e cf_db_cleanup_confirmation=DELETE
+# Specific phases:     ansible-playbook playbook.yml -t cleanup-database
+#                     ansible-playbook playbook.yml -t cleanup-vpc-peering
+#                     ansible-playbook playbook.yml -t cleanup-security-groups
+#                     ansible-playbook playbook.yml -t cleanup-nat-gateway
+#                     ansible-playbook playbook.yml -t cleanup-subnets
+#                     ansible-playbook playbook.yml -t cleanup-route-tables

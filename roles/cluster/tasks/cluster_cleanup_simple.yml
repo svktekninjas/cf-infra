@@ -1,0 +1,585 @@
+---
+# Simple and Direct ROSA Cluster Cleanup Task
+# This task removes ROSA cluster and all AWS resources tagged with app-<environment>
+
+- name: "Load environment configuration"
+  include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+  when: ansible_env_path is defined
+  failed_when: false
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+- name: "Set cleanup parameters"
+  set_fact:
+    cluster_name: "rosa-cluster-{{ target_environment }}"
+    cleanup_region: "{{ aws_region | default('us-east-1') }}"
+    cleanup_profile: "{{ aws_profile | default('sid-KS') }}"
+    app_tag_key: "app-{{ target_environment }}"
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+- name: "Display cleanup targets"
+  debug:
+    msg:
+      - "Cluster: {{ cluster_name }}"
+      - "Region: {{ cleanup_region }}"
+      - "Profile: {{ cleanup_profile }}"
+      - "Tag: {{ app_tag_key }}"
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+- name: "Confirm deletion"
+  pause:
+    prompt: "Type DELETE to confirm"
+  register: confirmation
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+- name: "Validate confirmation"
+  assert:
+    that: confirmation.user_input == "DELETE"
+    fail_msg: "Cancelled"
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete ROSA Cluster
+- name: "Delete ROSA cluster"
+  shell: |
+    rosa delete cluster -c {{ cluster_name }} --region {{ cleanup_region }} --yes 2>/dev/null || echo "Cluster not found"
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: cluster_deletion
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Release ALL Elastic IPs in the VPC (prevents IGW detachment issues)
+- name: "Release Elastic IPs associated with VPC"
+  shell: |
+    # Get VPC ID from tagged resources
+    VPC_ID=$(aws ec2 describe-vpcs \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" \
+      --query 'Vpcs[0].VpcId' \
+      --output text 2>/dev/null)
+    
+    if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+      echo "Found VPC: $VPC_ID"
+      
+      # Get all EIPs associated with instances in this VPC
+      INSTANCE_IDS=$(aws ec2 describe-instances \
+        --region {{ cleanup_region }} \
+        --filters "Name=vpc-id,Values=$VPC_ID" \
+        --query 'Reservations[].Instances[].InstanceId' \
+        --output text)
+      
+      if [ -n "$INSTANCE_IDS" ]; then
+        for instance in $INSTANCE_IDS; do
+          # Get EIP associations for this instance
+          EIP=$(aws ec2 describe-addresses \
+            --region {{ cleanup_region }} \
+            --filters "Name=instance-id,Values=$instance" \
+            --query 'Addresses[].AllocationId' \
+            --output text)
+          
+          if [ -n "$EIP" ]; then
+            echo "Releasing EIP $EIP from instance $instance"
+            aws ec2 release-address --allocation-id $EIP --region {{ cleanup_region }} || true
+          fi
+        done
+      fi
+      
+      # Also release any unassociated EIPs with our tag
+      TAGGED_EIPS=$(aws ec2 describe-addresses \
+        --region {{ cleanup_region }} \
+        --query "Addresses[?Tags[?Key=='{{ app_tag_key }}']].AllocationId" \
+        --output text)
+      
+      if [ -n "$TAGGED_EIPS" ]; then
+        for eip in $TAGGED_EIPS; do
+          echo "Releasing tagged EIP: $eip"
+          aws ec2 release-address --allocation-id $eip --region {{ cleanup_region }} || true
+        done
+      fi
+      
+      # Release any EIPs associated with NAT gateways in this VPC
+      NAT_EIPS=$(aws ec2 describe-nat-gateways \
+        --region {{ cleanup_region }} \
+        --filter "Name=vpc-id,Values=$VPC_ID" \
+        --query 'NatGateways[].NatGatewayAddresses[].AllocationId' \
+        --output text)
+      
+      if [ -n "$NAT_EIPS" ]; then
+        echo "Note: NAT Gateway EIPs will be released when NAT Gateways are deleted"
+      fi
+    else
+      echo "No VPC found with tag {{ app_tag_key }}"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: eip_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete EC2 Instances with app tag
+- name: "Terminate EC2 instances with {{ app_tag_key }} tag"
+  shell: |
+    INSTANCES=$(aws ec2 describe-instances \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" "Name=instance-state-name,Values=running,stopped" \
+      --query 'Reservations[].Instances[].InstanceId' \
+      --output text)
+    
+    if [ -n "$INSTANCES" ]; then
+      echo "Terminating: $INSTANCES"
+      aws ec2 terminate-instances --instance-ids $INSTANCES --region {{ cleanup_region }}
+      aws ec2 wait instance-terminated --instance-ids $INSTANCES --region {{ cleanup_region }}
+    else
+      echo "No instances found"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: ec2_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete Load Balancers
+- name: "Delete load balancers with {{ app_tag_key }} tag"
+  shell: |
+    LBS=$(aws elbv2 describe-load-balancers \
+      --region {{ cleanup_region }} \
+      --query 'LoadBalancers[].LoadBalancerArn' \
+      --output text)
+    
+    for lb in $LBS; do
+      HAS_TAG=$(aws elbv2 describe-tags \
+        --resource-arns $lb \
+        --region {{ cleanup_region }} \
+        --query "TagDescriptions[?Tags[?Key=='{{ app_tag_key }}']].ResourceArn" \
+        --output text)
+      
+      if [ -n "$HAS_TAG" ]; then
+        echo "Deleting load balancer: $lb"
+        aws elbv2 delete-load-balancer --load-balancer-arn $lb --region {{ cleanup_region }}
+      fi
+    done
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: lb_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Wait for load balancers to be deleted
+- name: "Wait for load balancers deletion"
+  pause:
+    seconds: 30
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete NAT Gateways and release their EIPs
+- name: "Delete NAT gateways with {{ app_tag_key }} tag"
+  shell: |
+    # Find NAT gateways by tag
+    NATS=$(aws ec2 describe-nat-gateways \
+      --region {{ cleanup_region }} \
+      --filter "Name=tag-key,Values={{ app_tag_key }}" "Name=state,Values=available" \
+      --query 'NatGateways[].NatGatewayId' \
+      --output text)
+    
+    # Also find NAT gateways in the VPC
+    VPC_ID=$(aws ec2 describe-vpcs \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" \
+      --query 'Vpcs[0].VpcId' \
+      --output text 2>/dev/null)
+    
+    if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+      VPC_NATS=$(aws ec2 describe-nat-gateways \
+        --region {{ cleanup_region }} \
+        --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" \
+        --query 'NatGateways[].NatGatewayId' \
+        --output text)
+      NATS="$NATS $VPC_NATS"
+    fi
+    
+    # Remove duplicates
+    NATS=$(echo $NATS | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    
+    if [ -n "$NATS" ]; then
+      for nat in $NATS; do
+        echo "Deleting NAT gateway: $nat"
+        
+        # Get the EIP allocation ID for this NAT gateway
+        NAT_EIP=$(aws ec2 describe-nat-gateways \
+          --nat-gateway-ids $nat \
+          --region {{ cleanup_region }} \
+          --query 'NatGateways[0].NatGatewayAddresses[0].AllocationId' \
+          --output text 2>/dev/null)
+        
+        # Delete the NAT gateway
+        aws ec2 delete-nat-gateway --nat-gateway-id $nat --region {{ cleanup_region }}
+        
+        if [ -n "$NAT_EIP" ] && [ "$NAT_EIP" != "None" ]; then
+          echo "NAT Gateway EIP $NAT_EIP will be released after deletion"
+        fi
+      done
+      
+      # Wait for NAT gateways to be fully deleted
+      echo "Waiting for NAT gateways to delete..."
+      for nat in $NATS; do
+        attempt=0
+        while [ $attempt -lt 30 ]; do
+          STATE=$(aws ec2 describe-nat-gateways \
+            --nat-gateway-ids $nat \
+            --region {{ cleanup_region }} \
+            --query 'NatGateways[0].State' \
+            --output text 2>/dev/null || echo "deleted")
+          
+          if [ "$STATE" = "deleted" ] || [ "$STATE" = "None" ]; then
+            echo "NAT Gateway $nat deleted"
+            
+            # Now release the EIP if it still exists
+            if [ -n "$NAT_EIP" ] && [ "$NAT_EIP" != "None" ]; then
+              echo "Releasing NAT Gateway EIP: $NAT_EIP"
+              aws ec2 release-address --allocation-id $NAT_EIP --region {{ cleanup_region }} 2>/dev/null || true
+            fi
+            break
+          fi
+          
+          echo "Waiting for $nat to delete (state: $STATE)..."
+          sleep 10
+          attempt=$((attempt+1))
+        done
+      done
+    else
+      echo "No NAT gateways found"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: nat_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete Network Interfaces
+- name: "Delete network interfaces with {{ app_tag_key }} tag"
+  shell: |
+    ENIS=$(aws ec2 describe-network-interfaces \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" \
+      --query 'NetworkInterfaces[].NetworkInterfaceId' \
+      --output text)
+    
+    if [ -n "$ENIS" ]; then
+      for eni in $ENIS; do
+        echo "Deleting network interface: $eni"
+        aws ec2 delete-network-interface --network-interface-id $eni --region {{ cleanup_region }} 2>/dev/null || echo "Could not delete $eni"
+      done
+    else
+      echo "No network interfaces found"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: eni_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete Security Groups (with retry logic)
+- name: "Delete security groups with {{ app_tag_key }} tag"
+  shell: |
+    for attempt in {1..3}; do
+      echo "Attempt $attempt: Checking for security groups"
+      SGS=$(aws ec2 describe-security-groups \
+        --region {{ cleanup_region }} \
+        --filters "Name=tag-key,Values={{ app_tag_key }}" \
+        --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
+        --output text)
+      
+      if [ -z "$SGS" ]; then
+        echo "No security groups found"
+        break
+      fi
+      
+      for sg in $SGS; do
+        echo "Processing security group: $sg"
+        
+        # Get and revoke ingress rules
+        INGRESS=$(aws ec2 describe-security-groups --group-ids $sg --region {{ cleanup_region }} --query 'SecurityGroups[0].IpPermissions' 2>/dev/null)
+        if [ "$INGRESS" != "[]" ] && [ "$INGRESS" != "null" ]; then
+          aws ec2 revoke-security-group-ingress --group-id $sg --region {{ cleanup_region }} --ip-permissions "$INGRESS" 2>/dev/null || true
+        fi
+        
+        # Get and revoke egress rules
+        EGRESS=$(aws ec2 describe-security-groups --group-ids $sg --region {{ cleanup_region }} --query 'SecurityGroups[0].IpPermissionsEgress' 2>/dev/null)
+        if [ "$EGRESS" != "[]" ] && [ "$EGRESS" != "null" ]; then
+          aws ec2 revoke-security-group-egress --group-id $sg --region {{ cleanup_region }} --ip-permissions "$EGRESS" 2>/dev/null || true
+        fi
+        
+        # Try to delete the group
+        aws ec2 delete-security-group --group-id $sg --region {{ cleanup_region }} 2>/dev/null && echo "Deleted $sg" || echo "Could not delete $sg"
+      done
+      
+      sleep 10
+    done
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: sg_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete EBS Volumes
+- name: "Delete EBS volumes with {{ app_tag_key }} tag"
+  shell: |
+    VOLUMES=$(aws ec2 describe-volumes \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" "Name=status,Values=available" \
+      --query 'Volumes[].VolumeId' \
+      --output text)
+    
+    if [ -n "$VOLUMES" ]; then
+      for vol in $VOLUMES; do
+        echo "Deleting volume: $vol"
+        aws ec2 delete-volume --volume-id $vol --region {{ cleanup_region }}
+      done
+    else
+      echo "No volumes found"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: volume_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete Subnets (with retry logic for dependencies)
+- name: "Delete subnets with {{ app_tag_key }} tag"
+  shell: |
+    for attempt in {1..3}; do
+      echo "Attempt $attempt: Checking for subnets"
+      SUBNETS=$(aws ec2 describe-subnets \
+        --region {{ cleanup_region }} \
+        --filters "Name=tag-key,Values={{ app_tag_key }}" \
+        --query 'Subnets[].SubnetId' \
+        --output text)
+      
+      if [ -z "$SUBNETS" ]; then
+        echo "No subnets found"
+        break
+      fi
+      
+      for subnet in $SUBNETS; do
+        echo "Processing subnet: $subnet"
+        
+        # Check for network interfaces in the subnet
+        ENIS=$(aws ec2 describe-network-interfaces \
+          --region {{ cleanup_region }} \
+          --filters "Name=subnet-id,Values=$subnet" \
+          --query 'NetworkInterfaces[].NetworkInterfaceId' \
+          --output text)
+        
+        if [ -n "$ENIS" ]; then
+          echo "Found network interfaces in subnet $subnet, attempting to delete them"
+          for eni in $ENIS; do
+            # Check if ENI is attached
+            ATTACHMENT=$(aws ec2 describe-network-interfaces \
+              --network-interface-ids $eni \
+              --region {{ cleanup_region }} \
+              --query 'NetworkInterfaces[0].Attachment.AttachmentId' \
+              --output text 2>/dev/null)
+            
+            if [ -n "$ATTACHMENT" ] && [ "$ATTACHMENT" != "None" ]; then
+              echo "Detaching ENI $eni"
+              aws ec2 detach-network-interface --attachment-id $ATTACHMENT --region {{ cleanup_region }} --force 2>/dev/null || true
+              sleep 5
+            fi
+            
+            echo "Deleting ENI $eni"
+            aws ec2 delete-network-interface --network-interface-id $eni --region {{ cleanup_region }} 2>/dev/null || true
+          done
+        fi
+        
+        # Try to delete the subnet
+        aws ec2 delete-subnet --subnet-id $subnet --region {{ cleanup_region }} 2>/dev/null && echo "Deleted subnet $subnet" || echo "Could not delete subnet $subnet"
+      done
+      
+      sleep 10
+    done
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: subnet_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete Route Tables (before VPC)
+- name: "Delete route tables with {{ app_tag_key }} tag"
+  shell: |
+    VPCS=$(aws ec2 describe-vpcs \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" \
+      --query 'Vpcs[].VpcId' \
+      --output text)
+    
+    if [ -n "$VPCS" ]; then
+      for vpc in $VPCS; do
+        # Delete non-main route tables
+        RTS=$(aws ec2 describe-route-tables \
+          --region {{ cleanup_region }} \
+          --filters "Name=vpc-id,Values=$vpc" "Name=association.main,Values=false" \
+          --query 'RouteTables[].RouteTableId' \
+          --output text)
+        
+        for rt in $RTS; do
+          echo "Deleting route table: $rt"
+          aws ec2 delete-route-table --route-table-id $rt --region {{ cleanup_region }} 2>/dev/null || true
+        done
+      done
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  when: delete_cluster_vpc | default(false)
+  register: rt_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete VPCs
+- name: "Delete VPCs with {{ app_tag_key }} tag"
+  shell: |
+    VPCS=$(aws ec2 describe-vpcs \
+      --region {{ cleanup_region }} \
+      --filters "Name=tag-key,Values={{ app_tag_key }}" \
+      --query 'Vpcs[].VpcId' \
+      --output text)
+    
+    if [ -n "$VPCS" ]; then
+      for vpc in $VPCS; do
+        # Delete Internet Gateways first
+        IGW=$(aws ec2 describe-internet-gateways \
+          --region {{ cleanup_region }} \
+          --filters "Name=attachment.vpc-id,Values=$vpc" \
+          --query 'InternetGateways[0].InternetGatewayId' \
+          --output text)
+        
+        if [ "$IGW" != "None" ] && [ -n "$IGW" ]; then
+          echo "Detaching IGW: $IGW"
+          aws ec2 detach-internet-gateway --internet-gateway-id $IGW --vpc-id $vpc --region {{ cleanup_region }} 2>/dev/null || true
+          aws ec2 delete-internet-gateway --internet-gateway-id $IGW --region {{ cleanup_region }} 2>/dev/null || true
+        fi
+        
+        echo "Deleting VPC: $vpc"
+        aws ec2 delete-vpc --vpc-id $vpc --region {{ cleanup_region }} 2>/dev/null || echo "Could not delete $vpc"
+      done
+    else
+      echo "No VPCs found"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  when: delete_cluster_vpc | default(false)
+  register: vpc_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete IAM Roles with tag
+- name: "Delete IAM roles with {{ app_tag_key }} tag"
+  shell: |
+    # Get all roles
+    ROLES=$(aws iam list-roles --query "Roles[].RoleName" --output text)
+    
+    for role in $ROLES; do
+      # Check if role has our tag
+      HAS_TAG=$(aws iam list-role-tags --role-name $role \
+        --query "Tags[?Key=='{{ app_tag_key }}'].Value" \
+        --output text 2>/dev/null)
+      
+      if [ -n "$HAS_TAG" ]; then
+        echo "Deleting IAM role: $role"
+        
+        # Detach policies
+        POLICIES=$(aws iam list-attached-role-policies --role-name $role --query 'AttachedPolicies[].PolicyArn' --output text)
+        for policy in $POLICIES; do
+          aws iam detach-role-policy --role-name $role --policy-arn $policy
+        done
+        
+        # Delete inline policies
+        INLINE=$(aws iam list-role-policies --role-name $role --query 'PolicyNames[]' --output text)
+        for policy in $INLINE; do
+          aws iam delete-role-policy --role-name $role --policy-name $policy
+        done
+        
+        # Delete the role
+        aws iam delete-role --role-name $role
+      fi
+    done
+    
+    # Also delete roles by name pattern
+    ROSA_ROLES=$(aws iam list-roles --query "Roles[?contains(RoleName, '{{ cluster_name }}')].RoleName" --output text)
+    
+    for role in $ROSA_ROLES; do
+      echo "Deleting ROSA role: $role"
+      
+      # Detach policies
+      POLICIES=$(aws iam list-attached-role-policies --role-name $role --query 'AttachedPolicies[].PolicyArn' --output text)
+      for policy in $POLICIES; do
+        aws iam detach-role-policy --role-name $role --policy-arn $policy
+      done
+      
+      # Delete the role
+      aws iam delete-role --role-name $role 2>/dev/null || true
+    done
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: iam_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Delete OIDC Providers
+- name: "Delete OIDC providers for cluster"
+  shell: |
+    OIDC_ARNS=$(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[?contains(Arn, '{{ cluster_name }}')].Arn" --output text)
+    
+    if [ -n "$OIDC_ARNS" ]; then
+      for arn in $OIDC_ARNS; do
+        echo "Deleting OIDC provider: $arn"
+        aws iam delete-open-id-connect-provider --open-id-connect-provider-arn $arn
+      done
+    else
+      echo "No OIDC providers found"
+    fi
+  environment:
+    AWS_PROFILE: "{{ cleanup_profile }}"
+  register: oidc_cleanup
+  tags:
+    - cluster-cleanup
+    - cleanup
+
+# Summary
+- name: "Display cleanup summary"
+  debug:
+    msg:
+      - "=== Cleanup Complete ==="
+      - "Cluster: {{ cluster_deletion.stdout | default('Not found') }}"
+      - "EC2: {{ ec2_cleanup.stdout | default('None') }}"
+      - "Load Balancers: {{ lb_cleanup.stdout | default('None') }}"
+      - "Security Groups: {{ sg_cleanup.stdout | default('None') }}"
+      - "Volumes: {{ volume_cleanup.stdout | default('None') }}"
+      - "Subnets: {{ subnet_cleanup.stdout | default('None') }}"
+      - "VPCs: {{ vpc_cleanup.stdout | default('None') if delete_cluster_vpc else 'Skipped' }}"
+      - "IAM Roles: Cleaned"
+      - "OIDC: {{ oidc_cleanup.stdout | default('None') }}"
+  tags:
+    - cluster-cleanup
+    - cleanup

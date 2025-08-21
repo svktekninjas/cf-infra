@@ -1,0 +1,146 @@
+---
+# Validate prerequisites for Harness setup
+
+- name: Check OpenShift CLI availability
+  command: which oc
+  register: oc_cli_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Fail if OpenShift CLI is not installed
+  fail:
+    msg: "OpenShift CLI (oc) is not installed. Please install it first."
+  when: oc_cli_check.rc != 0
+
+- name: Check current OpenShift context
+  command: oc whoami --show-server
+  register: oc_context
+  ignore_errors: yes
+  changed_when: false
+
+- name: Display current cluster context
+  debug:
+    msg: "Current OpenShift cluster: {{ oc_context.stdout }}"
+  when: oc_context.rc == 0
+
+- name: Verify OpenShift login
+  command: oc whoami
+  register: oc_user
+  ignore_errors: yes
+  changed_when: false
+
+- name: Fail if not logged into OpenShift
+  fail:
+    msg: "Not logged into OpenShift cluster. Please run: oc login {{ rosa_cluster_url }}"
+  when: oc_user.rc != 0
+
+- name: Display current OpenShift user
+  debug:
+    msg: "Logged in as: {{ oc_user.stdout }}"
+
+- name: Check AWS CLI availability
+  command: which aws
+  register: aws_cli_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Fail if AWS CLI is not installed
+  fail:
+    msg: "AWS CLI is not installed. Please install it first."
+  when: aws_cli_check.rc != 0 and enable_cross_account_ecr | bool
+
+- name: Verify AWS credentials
+  command: aws sts get-caller-identity
+  register: aws_identity
+  ignore_errors: yes
+  changed_when: false
+  when: enable_cross_account_ecr | bool
+
+- name: Display AWS identity
+  debug:
+    msg: "AWS Account: {{ (aws_identity.stdout | from_json).Account }}, User: {{ (aws_identity.stdout | from_json).Arn }}"
+  when: 
+    - enable_cross_account_ecr | bool
+    - aws_identity.rc == 0
+
+- name: Check if required namespaces exist
+  k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ item }}"
+  register: namespace_check
+  loop: "{{ harness_deployer_namespaces }}"
+  ignore_errors: yes
+
+- name: Create missing namespaces
+  k8s:
+    name: "{{ item.item }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+  loop: "{{ namespace_check.results }}"
+  when: item.resources | length == 0
+
+- name: Check if Harness delegate namespace exists
+  k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ harness_delegate_namespace }}"
+  register: delegate_namespace_check
+
+- name: Create Harness delegate namespace if missing
+  k8s:
+    name: "{{ harness_delegate_namespace }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+  when: delegate_namespace_check.resources | length == 0
+
+- name: Verify Harness credentials are provided
+  assert:
+    that:
+      - harness_account_id | length > 0
+      - harness_api_key | length > 0
+      - harness_delegate_token | length > 0
+    fail_msg: "Harness credentials not provided. Please set harness_account_id, harness_api_key, and harness_delegate_token"
+    success_msg: "All required Harness credentials are provided"
+
+- name: Check OIDC provider configuration
+  command: |
+    oc get clusterrolebinding -o json | jq -r '.items[].subjects[]? | select(.kind=="User") | .name' | grep -E "^system:oidc" | head -1
+  register: oidc_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Display OIDC provider status
+  debug:
+    msg: "OIDC provider {{ 'is configured' if oidc_check.rc == 0 else 'may not be configured' }}"
+
+- name: Validate ROSA cluster information
+  assert:
+    that:
+      - rosa_cluster_url | length > 0
+    fail_msg: "ROSA cluster URL not provided. Please set rosa_cluster_url"
+    success_msg: "ROSA cluster URL is configured: {{ rosa_cluster_url }}"
+
+- name: Check cluster permissions
+  command: oc auth can-i create clusterrolebinding
+  register: permission_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Warn if insufficient permissions
+  debug:
+    msg: "WARNING: You may not have cluster-admin permissions. Some operations might fail."
+  when: permission_check.rc != 0
+
+- name: Summary of prerequisites
+  debug:
+    msg: |
+      Prerequisites validation completed:
+      - OpenShift CLI: ✓
+      - OpenShift Login: ✓ ({{ oc_user.stdout }})
+      - AWS CLI: {{ '✓' if aws_cli_check.rc == 0 else '✗' }}
+      - Harness Credentials: ✓
+      - Required Namespaces: Created/Verified
+      - Cluster Permissions: {{ '✓' if permission_check.rc == 0 else '⚠ Limited' }}

@@ -1,0 +1,85 @@
+---
+# Main variables for cf-harness role
+# These variables override defaults and can be set per environment
+
+# Harness Account Credentials (should be in vault)
+harness_account_id: "{{ vault_harness_account_id | default('') }}"
+harness_api_key: "{{ vault_harness_api_key | default('') }}"
+harness_delegate_token: "{{ vault_harness_delegate_token | default('') }}"
+
+# AWS Credentials (should be in vault)
+aws_access_key_ref: "{{ vault_aws_access_key_ref | default('aws_access_key') }}"
+aws_secret_key_ref: "{{ vault_aws_secret_key_ref | default('aws_secret_key') }}"
+
+# ROSA Cluster Details
+rosa_cluster_url: "{{ vault_rosa_cluster_url | default('') }}"
+rosa_service_account_token_ref: "{{ vault_rosa_sa_token_ref | default('rosa_sa_token') }}"
+rosa_oidc_provider: "{{ vault_rosa_oidc_provider | default('') }}"
+
+# GitHub Credentials (should be in vault)
+github_username: "{{ vault_github_username | default('') }}"
+github_token_ref: "{{ vault_github_token_ref | default('github_pat') }}"
+
+# ECR Repository Configuration
+ecr_repositories:
+  - "consultingfirm/naming-server-service"
+  - "consultingfirm/api-gateway-service"
+  - "consultingfirm/config-service"
+  - "consultingfirm/spring-boot-admin-service"
+  - "consultingfirm/common-excel-service"
+  - "consultingfirm/bench-profile-service"
+  - "consultingfirm/daily-submissions-service"
+  - "consultingfirm/interviews-service"
+  - "consultingfirm/placements-service"
+  - "consultingfirm/frontend-service"
+
+# Image Tags
+image_tags:
+  naming_server: "latest"
+  api_gateway: "latest"
+  spring_boot_admin: "latest"
+  config_service: "latest"
+  excel_service: "latest"
+  bench_profile: "latest"
+  daily_submissions: "latest"
+  interviews: "latest"
+  placements: "latest"
+  frontend: "latest"
+
+# Helm Chart Configuration
+helm_chart_version: "1.0.0"
+helm_values_path: "environments/{{ environment }}/deployment-values.yaml"
+
+# Network Configuration
+enable_network_policies: true
+allowed_namespaces:
+  - "cf-monitor"
+  - "cf-app"
+  - "cf-{{ environment }}"
+  - "harness-delegate-ng"
+
+# RBAC Configuration
+cluster_roles:
+  - name: "harness-delegate-cluster-role"
+    rules:
+      - apiGroups: ["*"]
+        resources: ["*"]
+        verbs: ["*"]
+  - name: "ecr-sa-role"
+    rules:
+      - apiGroups: [""]
+        resources: ["secrets", "configmaps"]
+        verbs: ["get", "list", "create", "update", "patch"]
+      - apiGroups: ["apps"]
+        resources: ["deployments", "replicasets"]
+        verbs: ["get", "list"]
+
+# Monitoring Configuration
+enable_monitoring: true
+prometheus_namespace: "cf-monitor"
+grafana_namespace: "cf-monitor"
+
+# Logging Configuration
+enable_logging: true
+log_level: "INFO"
+log_retention_days: 30

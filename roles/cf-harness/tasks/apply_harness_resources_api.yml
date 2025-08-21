@@ -1,0 +1,362 @@
+---
+# Apply Harness resources using REST API (services, pipelines, environments)
+
+- name: Set API base URL and headers
+  set_fact:
+    harness_api_base: "https://app.harness.io/gateway"
+    harness_api_headers:
+      x-api-key: "{{ harness_api_key }}"
+      Content-Type: "application/json"
+
+- name: Check if service definition exists
+  stat:
+    path: "/Users/swaroop/SIDKS/Deploy/harness/service.yaml"
+  register: service_file
+
+- name: Create temp directory for resources
+  file:
+    path: "/tmp/harness-resources"
+    state: directory
+    mode: '0755'
+
+# Create/Update Service
+- name: Check if service exists
+  uri:
+    url: "{{ harness_api_base }}/ng/api/servicesV2/{{ service_identifier | default('cf-microservices') }}"
+    method: GET
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+    status_code: [200, 404]
+    validate_certs: yes
+  register: service_check
+  failed_when: false
+
+- name: Create/Update service via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/servicesV2{{ '' if service_check.status == 404 else '/' + service_identifier }}"
+    method: "{{ 'POST' if service_check.status == 404 else 'PUT' }}"
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      identifier: "{{ service_identifier | default('cf-microservices') }}"
+      name: "{{ service_name | default('CF Microservices') }}"
+      description: "CF microservices deployment service"
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+      yaml: |
+        service:
+          name: {{ service_name | default('CF Microservices') }}
+          identifier: {{ service_identifier | default('cf-microservices') }}
+          serviceDefinition:
+            type: Kubernetes
+            spec:
+              manifests:
+                - manifest:
+                    identifier: cf_helm_chart
+                    type: HelmChart
+                    spec:
+                      store:
+                        type: Github
+                        spec:
+                          connectorRef: {{ connector_github_id }}
+                          gitFetchType: Branch
+                          paths:
+                            - helm-charts/cf-microservices
+                          branch: {{ github_branch }}
+                      chartName: cf-microservices
+                      chartVersion: {{ helm_chart_version }}
+                      helmVersion: V3
+                      skipResourceVersioning: false
+              artifacts:
+                primary:
+                  primaryArtifactRef: <+input>
+                  sources:
+                    - identifier: naming_server
+                      type: Ecr
+                      spec:
+                        connectorRef: {{ connector_aws_ecr_id }}
+                        imagePath: {{ ecr_registry }}/cf-naming-server
+                        tag: {{ image_tags.naming_server }}
+                    - identifier: api_gateway
+                      type: Ecr
+                      spec:
+                        connectorRef: {{ connector_aws_ecr_id }}
+                        imagePath: {{ ecr_registry }}/cf-api-gateway
+                        tag: {{ image_tags.api_gateway }}
+                    - identifier: spring_boot_admin
+                      type: Ecr
+                      spec:
+                        connectorRef: {{ connector_aws_ecr_id }}
+                        imagePath: {{ ecr_registry }}/cf-spring-boot-admin
+                        tag: {{ image_tags.spring_boot_admin }}
+                    - identifier: config_service
+                      type: Ecr
+                      spec:
+                        connectorRef: {{ connector_aws_ecr_id }}
+                        imagePath: {{ ecr_registry }}/cf-config-service
+                        tag: {{ image_tags.config_service }}
+    status_code: [200, 201]
+  register: service_result
+
+- name: Display service result
+  debug:
+    msg: "Service {{ 'created' if service_check.status == 404 else 'updated' }}: {{ service_identifier | default('cf-microservices') }}"
+
+# Create Environments
+- name: Create environments via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/environmentsV2"
+    method: POST
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      identifier: "{{ item }}"
+      name: "{{ item | upper }}"
+      description: "{{ item | upper }} environment for CF deployment"
+      type: "PreProduction" 
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+      yaml: |
+        environment:
+          name: {{ item | upper }}
+          identifier: {{ item }}
+          type: PreProduction
+          tags:
+            environment: {{ item }}
+          variables:
+            - name: namespace
+              type: String
+              value: cf-{{ item }}
+              description: Kubernetes namespace
+            - name: cluster_endpoint
+              type: String
+              value: {{ rosa_cluster_endpoints[item] | default(rosa_api_endpoint.stdout) }}
+              description: Cluster API endpoint
+    status_code: [200, 201, 409]
+    validate_certs: yes
+  loop: "{{ environments_list }}"
+  register: env_results
+  failed_when: false
+
+- name: Display environment creation results
+  debug:
+    msg: "Environment {{ item.item }}: {{ 'Created' if item.status == 201 else 'Already exists' if item.status == 409 else 'Updated' }}"
+  loop: "{{ env_results.results }}"
+
+# Create Infrastructure Definitions
+- name: Create infrastructure definitions via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/infrastructures"
+    method: POST
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      identifier: "{{ item }}_infra"
+      name: "{{ item | upper }} Infrastructure"
+      description: "Infrastructure definition for {{ item }} environment"
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+      environmentRef: "{{ item }}"
+      deploymentType: "Kubernetes"
+      type: "KubernetesDirect"
+      yaml: |
+        infrastructureDefinition:
+          name: {{ item | upper }} Infrastructure
+          identifier: {{ item }}_infra
+          type: KubernetesDirect
+          deploymentType: Kubernetes
+          environment:
+            environmentRef: {{ item }}
+          spec:
+            connectorRef: {{ connector_rosa_cluster_id }}
+            namespace: cf-{{ item }}
+            releaseName: cf-microservices-{{ item }}
+    status_code: [200, 201, 409]
+    validate_certs: yes
+  loop: "{{ environments_list }}"
+  register: infra_results
+  failed_when: false
+
+- name: Display infrastructure creation results
+  debug:
+    msg: "Infrastructure {{ item.item }}_infra: {{ 'Created' if item.status == 201 else 'Already exists' if item.status == 409 else 'Updated' }}"
+  loop: "{{ infra_results.results }}"
+
+# Create Pipeline if enabled
+- name: Create deployment pipeline via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/pipelines"
+    method: POST
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      identifier: "cf_deployment_pipeline"
+      name: "CF Deployment Pipeline"
+      description: "Pipeline for deploying CF microservices"
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+      yaml: |
+        pipeline:
+          name: CF Deployment Pipeline
+          identifier: cf_deployment_pipeline
+          projectIdentifier: {{ harness_project_id }}
+          orgIdentifier: {{ harness_org_id }}
+          tags:
+            application: cf-microservices
+          stages:
+            - stage:
+                name: Deploy to Dev
+                identifier: deploy_dev
+                type: Deployment
+                spec:
+                  deploymentType: Kubernetes
+                  service:
+                    serviceRef: {{ service_identifier | default('cf-microservices') }}
+                  environment:
+                    environmentRef: dev
+                    deployToAll: false
+                    infrastructureDefinitions:
+                      - identifier: dev_infra
+                  execution:
+                    steps:
+                      - step:
+                          type: K8sRollingDeploy
+                          name: Rolling Deployment
+                          identifier: rolling_deployment
+                          spec:
+                            skipDryRun: false
+                            pruningEnabled: false
+                    rollbackSteps:
+                      - step:
+                          type: K8sRollingRollback
+                          name: Rollback
+                          identifier: rollback
+            - stage:
+                name: Deploy to Test
+                identifier: deploy_test
+                type: Deployment
+                spec:
+                  deploymentType: Kubernetes
+                  service:
+                    serviceRef: {{ service_identifier | default('cf-microservices') }}
+                  environment:
+                    environmentRef: test
+                    deployToAll: false
+                    infrastructureDefinitions:
+                      - identifier: test_infra
+                  execution:
+                    steps:
+                      - step:
+                          type: K8sRollingDeploy
+                          name: Rolling Deployment
+                          identifier: rolling_deployment
+                          spec:
+                            skipDryRun: false
+                            pruningEnabled: false
+                    rollbackSteps:
+                      - step:
+                          type: K8sRollingRollback
+                          name: Rollback
+                          identifier: rollback
+                when:
+                  stageStatus: Success
+                  condition: <+pipeline.stages.deploy_dev.status> == "Success"
+    status_code: [200, 201, 409]
+    validate_certs: yes
+  register: pipeline_result
+  when: enable_pipeline_creation | bool
+  failed_when: false
+
+- name: Display pipeline creation result
+  debug:
+    msg: "Pipeline cf_deployment_pipeline: {{ 'Created' if pipeline_result.status == 201 else 'Already exists' if pipeline_result.status == 409 else 'Updated' }}"
+  when: enable_pipeline_creation | bool
+
+# List all resources
+- name: List all services via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/servicesV2"
+    method: GET
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+    status_code: 200
+    validate_certs: yes
+  register: services_list
+
+- name: List all environments via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/environmentsV2"
+    method: GET
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+    status_code: 200
+    validate_certs: yes
+  register: environments_list_output
+
+- name: List all pipelines via API
+  uri:
+    url: "{{ harness_api_base }}/ng/api/pipelines"
+    method: GET
+    headers: "{{ harness_api_headers }}"
+    body_format: json
+    body:
+      accountIdentifier: "{{ harness_account_id }}"
+      orgIdentifier: "{{ harness_org_id }}"
+      projectIdentifier: "{{ harness_project_id }}"
+    status_code: 200
+    validate_certs: yes
+  register: pipelines_list
+  when: enable_pipeline_creation | bool
+
+- name: Display resources summary
+  debug:
+    msg: |
+      ========================================
+      Harness Resources Created via API:
+      ========================================
+      
+      Services (Total: {{ services_list.json.data.totalItems | default(0) }}):
+      {% for service in services_list.json.data.content | default([]) %}
+      - {{ service.service.name }} ({{ service.service.identifier }})
+      {% endfor %}
+      
+      Environments (Total: {{ environments_list_output.json.data.totalItems | default(0) }}):
+      {% for env in environments_list_output.json.data.content | default([]) %}
+      - {{ env.environment.name }} ({{ env.environment.identifier }})
+      {% endfor %}
+      
+      {% if enable_pipeline_creation %}
+      Pipelines (Total: {{ pipelines_list.json.data.totalItems | default(0) }}):
+      {% for pipeline in pipelines_list.json.data.content | default([]) %}
+      - {{ pipeline.name }} ({{ pipeline.identifier }})
+      {% endfor %}
+      {% endif %}
+      
+      Next Steps:
+      1. Log into Harness UI: {{ harness_platform_url }}
+      2. Navigate to your project: {{ harness_project_id }}
+      3. Verify all resources are created
+      4. Configure any additional settings in the UI
+      5. Execute pipeline for deployment
+
+- name: Clean up temp directory
+  file:
+    path: "/tmp/harness-resources"
+    state: absent
+  when: not debug_mode | bool

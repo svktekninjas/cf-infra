@@ -1,0 +1,119 @@
+---
+# Default variables for cf-harness role
+
+# Harness Platform Configuration
+harness_platform_url: "https://app.harness.io"
+harness_api_endpoint: "https://app.harness.io/gateway/api"
+harness_api_base_url: "https://app.harness.io/gateway"  # Base URL for API calls
+harness_delegate_endpoint: "https://app.harness.io/grpc"
+harness_log_endpoint: "https://app.harness.io/log-service/"
+harness_org_id: "default"
+harness_project_id: "cf-deploy"
+
+# Method Selection (API recommended over CLI)
+use_harness_cli: false  # Set to true to use CLI instead of API (not recommended)
+use_harness_api: true   # Use REST API for full functionality
+
+# Harness CLI Configuration (if used)
+harness_cli_version: "latest"
+harness_cli_install_dir: "/usr/local/bin"
+harness_cli_config_dir: "{{ ansible_env.HOME }}/.harness"
+
+# Delegate Configuration
+harness_delegate_name: "rosa-harness-delegate"
+harness_delegate_namespace: "harness-delegate-ng"
+harness_delegate_replicas: 1
+harness_delegate_image: "harness/delegate:24.11.86804"
+harness_delegate_image_pull_policy: "Always"
+harness_delegate_tags: "rosa,cf-deploy,openshift"
+harness_delegate_description: "ROSA Cluster Delegate for CF Deployment"
+
+# Delegate Resources
+harness_delegate_cpu_request: "500m"
+harness_delegate_cpu_limit: "1000m"
+harness_delegate_memory_request: "1Gi"
+harness_delegate_memory_limit: "2Gi"
+
+# Service Account Configuration
+harness_deployer_sa_name: "ecr-sa"
+harness_deployer_namespaces:
+  - "cf-monitor"
+  - "cf-app"
+harness_delegate_sa_name: "cf-deploy"
+
+# AWS Configuration
+aws_region: "us-east-1"
+aws_account_id_source: "818140567777"  # sidatks account (ECR)
+aws_account_id_target: "606639739464"  # svktek account (ROSA)
+ecr_registry: "{{ aws_account_id_source }}.dkr.ecr.{{ aws_region }}.amazonaws.com"
+ecr_cross_account_role_name: "ECRCrossAccountAdmin"
+ecr_assume_role_name: "ROSAECRAssumeRole"
+ecr_external_id: "cf-ecr-cross-account-{{ environment }}-2025"
+
+# ROSA Cluster Configuration
+rosa_cluster_name: "cf-rosa-cluster-{{ environment }}"
+rosa_namespace: "cf-{{ environment }}"
+
+# GitHub Configuration - These will be overridden by environment-specific vars
+github_url: "https://github.com"
+github_repo: "cf-deploy"
+github_username: ""  # Set in environment vars
+github_token_ref: ""  # Set in environment vars
+github_branch: "main"
+
+# Connector Identifiers
+connector_aws_ecr_id: "aws_ecr_connector_{{ environment }}"
+connector_rosa_cluster_id: "rosa_cluster_connector_{{ environment }}"
+connector_github_id: "cf_deploy_github"
+
+# Environment Configuration
+environment: "dev"
+environments_list:
+  - dev
+  - test
+  - prod
+
+# Microservices Configuration
+microservices_list:
+  - naming-server
+  - api-gateway
+  - spring-boot-admin
+  - config-service
+  - excel-service
+  - bench-profile
+  - daily-submissions
+  - interviews
+  - placements
+  - frontend
+
+# Feature Flags
+enable_delegate_installation: true
+enable_connector_creation: true
+enable_service_creation: true
+enable_pipeline_creation: false
+enable_irsa_configuration: true
+enable_cross_account_ecr: true
+
+# Retry Configuration
+max_retries: 3
+retry_delay: 10
+
+# Validation Settings
+validate_prerequisites: true
+validate_cli_installation: true
+validate_cluster_access: true
+validate_aws_credentials: true
+validate_harness_connection: true
+
+# Cleanup Settings
+cleanup_on_failure: false
+remove_existing_delegate: false
+
+# Debug Settings
+debug_mode: false
+verbose_output: false
+save_validation_report: true
+
+# API Response Settings
+api_request_timeout: 30
+api_validate_certs: true

@@ -1,0 +1,100 @@
+---
+# Task 3: Create ROSA auth token variable and update .env file in terraform/environments folder
+- name: Set target environment variable
+  set_fact:
+    target_env: "{{ target_environment | default('') }}"
+  tags: rosa
+
+- name: Prompt user for environment (dev/test/prod)
+  pause:
+    prompt: "Please enter the target environment (dev/test/prod)"
+  register: environment_input
+  when: target_env == ""
+  tags: rosa
+
+- name: Set environment from user input
+  set_fact:
+    target_env: "{{ environment_input.user_input | lower }}"
+  when: target_env == "" and environment_input.user_input is defined
+  tags: rosa
+
+- name: Validate environment input
+  fail:
+    msg: "Environment must be one of: dev, test, prod"
+  when: target_env not in ['dev', 'test', 'prod']
+  tags: rosa
+
+- name: Set ansible environment path
+  set_fact:
+    ansible_env_path: "{{ playbook_dir }}/../environments/{{ target_env }}"
+  tags: rosa
+
+- name: Set environment file path
+  set_fact:
+    env_file_path: "{{ ansible_env_path }}/.env"
+  tags: rosa
+
+- name: Check if environment directory exists
+  stat:
+    path: "{{ ansible_env_path }}"
+  register: env_dir_check
+  tags: rosa
+
+- name: Create environment directory if it doesn't exist
+  file:
+    path: "{{ ansible_env_path }}"
+    state: directory
+    mode: '0755'
+  when: not env_dir_check.stat.exists
+  tags: rosa
+
+- name: Check if environment file exists
+  stat:
+    path: "{{ env_file_path }}"
+  register: env_file_check
+  tags: rosa
+
+- name: Create environment file if it doesn't exist
+  file:
+    path: "{{ env_file_path }}"
+    state: touch
+    mode: '0644'
+  when: not env_file_check.stat.exists
+  tags: rosa
+
+- name: Update environment file with ROSA token only
+  blockinfile:
+    path: "{{ env_file_path }}"
+    block: |
+      # ROSA CLI authentication token
+      export ROSA_TOKEN="{{ validated_rosa_token }}"
+      export TF_VAR_rosa_token="{{ validated_rosa_token }}"
+    marker: "# {mark} ANSIBLE MANAGED ROSA BLOCK"
+    backup: yes
+    create: yes
+  tags: rosa
+
+- name: Display environment configuration status
+  debug:
+    msg: |
+      ROSA CLI environment configuration completed:
+      - Environment: {{ target_env }}
+      - Ansible environment path: {{ ansible_env_path }}
+      - Config file: {{ env_file_path }}
+      - ROSA token added to environment file
+      
+      To use the environment variables, run:
+      source {{ env_file_path }}
+  tags: rosa
+
+- name: Verify environment file was created/updated
+  stat:
+    path: "{{ env_file_path }}"
+  register: final_env_check
+  tags: rosa
+
+- name: Confirm successful configuration
+  debug:
+    msg: "✓ ROSA CLI role configuration completed successfully"
+  when: final_env_check.stat.exists
+  tags: rosa

@@ -1,0 +1,319 @@
+# Apply tags to AWS resources created by ROSA cluster
+---
+- name: "Load environment-specific cluster configuration"
+  include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Get cluster information for tagging"
+  shell: rosa describe cluster -c {{ full_cluster_name }} --output json
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_info_for_tags
+  changed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Extract cluster infrastructure ID"
+  set_fact:
+    cluster_infra_id: "{{ (cluster_info_for_tags.stdout | from_json).infra_id }}"
+    cluster_id: "{{ (cluster_info_for_tags.stdout | from_json).id }}"
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Display tagging information"
+  debug:
+    msg:
+      - "🏷️  Applying tags to cluster resources:"
+      - "  - Cluster: {{ full_cluster_name }}"
+      - "  - Infrastructure ID: {{ cluster_infra_id }}"
+      - "  - Cluster ID: {{ cluster_id }}"
+      - "  - Tags to apply:"
+      - "    {{ resource_tags | to_nice_yaml }}"
+  when: resource_tags is defined
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Tag EC2 Instances
+- name: "Get EC2 instances created by ROSA"
+  shell: |
+    aws ec2 describe-instances \
+      --region {{ aws_region }} \
+      --filters "Name=tag:red-hat-clusterid,Values={{ cluster_id }}" \
+      --query 'Reservations[].Instances[].InstanceId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: ec2_instances
+  changed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to EC2 instances"
+  shell: |
+    if [ -n "{{ ec2_instances.stdout }}" ]; then
+      aws ec2 create-tags \
+        --region {{ aws_region }} \
+        --resources {{ ec2_instances.stdout }} \
+        --tags Key=app-{{ target_environment }},Value=ec2-{{ full_cluster_name }}
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - ec2_instances.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Tag VPC and Subnets
+- name: "Get VPC used by ROSA cluster"
+  shell: |
+    aws ec2 describe-vpcs \
+      --region {{ aws_region }} \
+      --filters "Name=tag:kubernetes.io/cluster/{{ cluster_infra_id }},Values=owned" \
+      --query 'Vpcs[0].VpcId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_vpc
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to VPC"
+  shell: |
+    if [ "{{ cluster_vpc.stdout }}" != "None" ] && [ -n "{{ cluster_vpc.stdout }}" ]; then
+      aws ec2 create-tags \
+        --region {{ aws_region }} \
+        --resources {{ cluster_vpc.stdout }} \
+        --tags Key=app-{{ target_environment }},Value=vpc-{{ full_cluster_name }}
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - cluster_vpc.stdout != "None"
+    - cluster_vpc.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Get subnets used by ROSA cluster"
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ aws_region }} \
+      --filters "Name=tag:kubernetes.io/cluster/{{ cluster_infra_id }},Values=owned" \
+      --query 'Subnets[].SubnetId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_subnets
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to subnets"
+  shell: |
+    if [ -n "{{ cluster_subnets.stdout }}" ]; then
+      aws ec2 create-tags \
+        --region {{ aws_region }} \
+        --resources {{ cluster_subnets.stdout }} \
+        --tags Key=app-{{ target_environment }},Value=subnet-{{ full_cluster_name }}
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - cluster_subnets.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Tag Security Groups
+- name: "Get security groups created by ROSA"
+  shell: |
+    aws ec2 describe-security-groups \
+      --region {{ aws_region }} \
+      --filters "Name=tag:kubernetes.io/cluster/{{ cluster_infra_id }},Values=owned" \
+      --query 'SecurityGroups[].GroupId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_security_groups
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to security groups"
+  shell: |
+    if [ -n "{{ cluster_security_groups.stdout }}" ]; then
+      aws ec2 create-tags \
+        --region {{ aws_region }} \
+        --resources {{ cluster_security_groups.stdout }} \
+        --tags Key=app-{{ target_environment }},Value=sg-{{ full_cluster_name }}
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - cluster_security_groups.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Tag Load Balancers
+- name: "Get load balancers created by ROSA"
+  shell: |
+    aws elbv2 describe-load-balancers \
+      --region {{ aws_region }} \
+      --query "LoadBalancers[?contains(LoadBalancerName, '{{ cluster_infra_id }}')].LoadBalancerArn" \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_load_balancers
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to load balancers"
+  shell: |
+    if [ -n "{{ cluster_load_balancers.stdout }}" ]; then
+      for lb in {{ cluster_load_balancers.stdout }}; do
+        aws elbv2 add-tags \
+          --region {{ aws_region }} \
+          --resource-arns $lb \
+          --tags Key=app-{{ target_environment }},Value=lb-{{ full_cluster_name }}
+      done
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - cluster_load_balancers.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Tag EBS Volumes
+- name: "Get EBS volumes created by ROSA"
+  shell: |
+    aws ec2 describe-volumes \
+      --region {{ aws_region }} \
+      --filters "Name=tag:kubernetes.io/cluster/{{ cluster_infra_id }},Values=owned" \
+      --query 'Volumes[].VolumeId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_volumes
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to EBS volumes"
+  shell: |
+    if [ -n "{{ cluster_volumes.stdout }}" ]; then
+      aws ec2 create-tags \
+        --region {{ aws_region }} \
+        --resources {{ cluster_volumes.stdout }} \
+        --tags Key=app-{{ target_environment }},Value=ebs-{{ full_cluster_name }}
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - cluster_volumes.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Tag NAT Gateways
+- name: "Get NAT Gateways if VPC is cluster-owned"
+  shell: |
+    if [ "{{ cluster_vpc.stdout }}" != "None" ] && [ -n "{{ cluster_vpc.stdout }}" ]; then
+      aws ec2 describe-nat-gateways \
+        --region {{ aws_region }} \
+        --filter "Name=vpc-id,Values={{ cluster_vpc.stdout }}" \
+        --query 'NatGateways[].NatGatewayId' \
+        --output text
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_nat_gateways
+  changed_when: false
+  failed_when: false
+  when: 
+    - cluster_vpc.stdout is defined
+    - cluster_vpc.stdout != "None"
+    - cluster_vpc.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+- name: "Apply tags to NAT Gateways"
+  shell: |
+    if [ -n "{{ cluster_nat_gateways.stdout | default('') }}" ]; then
+      aws ec2 create-tags \
+        --region {{ aws_region }} \
+        --resources {{ cluster_nat_gateways.stdout }} \
+        --tags Key=app-{{ target_environment }},Value=nat-{{ full_cluster_name }}
+    fi
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: 
+    - resource_tags is defined
+    - cluster_nat_gateways.stdout is defined
+    - cluster_nat_gateways.stdout != ""
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags
+
+# Summary of tagging
+- name: "Display tagging summary"
+  debug:
+    msg:
+      - "✅ Resource tagging completed:"
+      - "  - EC2 Instances: {{ 'Tagged' if ec2_instances.stdout != '' else 'None found' }}"
+      - "  - VPC: {{ 'Tagged' if cluster_vpc.stdout not in ['None', ''] else 'Not cluster-owned' }}"
+      - "  - Subnets: {{ 'Tagged' if cluster_subnets.stdout != '' else 'None found' }}"
+      - "  - Security Groups: {{ 'Tagged' if cluster_security_groups.stdout != '' else 'None found' }}"
+      - "  - Load Balancers: {{ 'Tagged' if cluster_load_balancers.stdout != '' else 'None found' }}"
+      - "  - EBS Volumes: {{ 'Tagged' if cluster_volumes.stdout != '' else 'None found' }}"
+      - "  - NAT Gateways: {{ 'Tagged' if cluster_nat_gateways.stdout | default('') != '' else 'None found or not applicable' }}"
+  tags:
+    - cluster
+    - cluster-tags
+    - resource-tags

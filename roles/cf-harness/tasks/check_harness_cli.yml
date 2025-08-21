@@ -1,0 +1,117 @@
+---
+# Check and install Harness CLI
+
+- name: Check if Harness CLI is installed
+  command: which harness
+  register: harness_cli_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Display CLI status
+  debug:
+    msg: "Harness CLI is {{ 'installed' if harness_cli_check.rc == 0 else 'not installed' }}"
+
+- name: Get system architecture
+  command: uname -sm
+  register: system_arch
+  changed_when: false
+  when: harness_cli_check.rc != 0
+
+- name: Set CLI download URL based on architecture
+  set_fact:
+    harness_cli_url: |
+      {% if 'Darwin' in system_arch.stdout and 'arm64' in system_arch.stdout %}
+      https://github.com/harness/harness-cli/releases/latest/download/harness-Darwin-arm64
+      {% elif 'Darwin' in system_arch.stdout %}
+      https://github.com/harness/harness-cli/releases/latest/download/harness-Darwin-x86_64
+      {% elif 'Linux' in system_arch.stdout and 'x86_64' in system_arch.stdout %}
+      https://github.com/harness/harness-cli/releases/latest/download/harness-Linux-x86_64
+      {% elif 'Linux' in system_arch.stdout and 'arm64' in system_arch.stdout %}
+      https://github.com/harness/harness-cli/releases/latest/download/harness-Linux-arm64
+      {% else %}
+      https://github.com/harness/harness-cli/releases/latest/download/harness-Linux-x86_64
+      {% endif %}
+  when: harness_cli_check.rc != 0
+
+- name: Download Harness CLI
+  get_url:
+    url: "{{ harness_cli_url | trim }}"
+    dest: "/tmp/harness-cli"
+    mode: '0755'
+  when: harness_cli_check.rc != 0
+
+- name: Install Harness CLI
+  become: yes
+  copy:
+    src: "/tmp/harness-cli"
+    dest: "{{ harness_cli_install_dir }}/harness"
+    mode: '0755'
+    remote_src: yes
+  when: harness_cli_check.rc != 0
+
+- name: Verify Harness CLI installation
+  command: harness --version
+  register: harness_version
+  changed_when: false
+
+- name: Display Harness CLI version
+  debug:
+    msg: "Harness CLI version: {{ harness_version.stdout }}"
+
+- name: Check if Harness CLI is configured
+  stat:
+    path: "{{ harness_cli_config_dir }}/config.yaml"
+  register: harness_config
+
+- name: Configure Harness CLI if not configured
+  block:
+    - name: Ensure .harness directory exists
+      file:
+        path: "{{ harness_cli_config_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Login to Harness
+      shell: |
+        harness login \
+          --api-key {{ harness_api_key }} \
+          --account-id {{ harness_account_id }}
+      environment:
+        HARNESS_PLATFORM_URL: "{{ harness_platform_url }}"
+      no_log: true
+      register: harness_login
+      
+    - name: Verify Harness CLI configuration
+      command: harness account
+      register: harness_account_info
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display Harness account information
+      debug:
+        msg: "Connected to account: {{ harness_account_id }}"
+      when: harness_account_info.rc == 0
+  when: not harness_config.stat.exists or harness_api_key | length > 0
+
+- name: Create CLI configuration template
+  template:
+    src: harness-cli-config.yaml.j2
+    dest: "{{ harness_cli_config_dir }}/config.yaml"
+    mode: '0600'
+  when: harness_api_key | length > 0
+
+- name: Test Harness API connectivity
+  uri:
+    url: "{{ harness_api_endpoint }}/users/current"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_key }}"
+    status_code: 200
+  register: api_test
+  when: harness_api_key | length > 0
+  no_log: true
+
+- name: Display API connectivity status
+  debug:
+    msg: "Harness API connectivity: SUCCESS"
+  when: api_test is defined and api_test.status == 200

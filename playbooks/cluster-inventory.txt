@@ -1,0 +1,1 @@
+dev: rosa-cluster-dev (ready) - https://console-openshift-console.apps.x3u6j0m9y2e0q8r.wdv8.p1.openshiftapps.com

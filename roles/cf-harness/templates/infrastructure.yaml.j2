@@ -1,0 +1,14 @@
+infrastructure:
+  name: rosa-{{ item }}
+  identifier: rosa_{{ item }}
+  description: ROSA infrastructure for {{ item }} environment
+  tags:
+    - rosa
+    - {{ item }}
+  environmentRef: {{ item }}
+  deploymentType: Kubernetes
+  type: KubernetesDirect
+  spec:
+    connectorRef: {{ connector_rosa_cluster_id }}
+    namespace: cf-{{ item }}
+    releaseName: cf-microservices-{{ item }}

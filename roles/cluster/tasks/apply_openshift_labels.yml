@@ -1,0 +1,165 @@
+# Apply labels to OpenShift/Kubernetes resources
+---
+- name: "Load environment-specific cluster configuration"
+  include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels
+
+- name: "Login to OpenShift cluster"
+  shell: |
+    oc login {{ cluster_api_url }} \
+      --username={{ admin_username }} \
+      --password={{ admin_password }} \
+      --insecure-skip-tls-verify=true
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when:
+    - cluster_api_url is defined
+    - admin_username is defined
+    - admin_password is defined
+  register: oc_login
+  no_log: true  # Hide credentials from output
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels
+
+- name: "Apply labels to all namespaces"
+  shell: |
+    # Get all namespaces except system ones
+    namespaces=$(oc get namespaces -o name | grep -v openshift | grep -v kube | grep -v default)
+    
+    for ns in $namespaces; do
+      echo "Labeling namespace: $ns"
+      oc label $ns \
+        environment={{ target_environment }} \
+        application={{ resource_tags.Application | default('rosa-infrastructure') }} \
+        managed-by={{ resource_tags.ManagedBy | default('ansible') }} \
+        team={{ resource_tags.Team | default('platform-engineering') }} \
+        cost-center={{ resource_tags.CostCenter | default('engineering') }} \
+        project={{ resource_tags.Project | default('cloud-native') }} \
+        owner={{ resource_tags.Owner | default('devops-team') }} \
+        --overwrite
+    done
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when:
+    - resource_tags is defined
+    - oc_login is defined
+    - oc_login is not skipped
+    - oc_login is succeeded
+  register: namespace_labeling
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels
+
+- name: "Apply labels to nodes"
+  shell: |
+    # Label all nodes with environment and cluster information
+    nodes=$(oc get nodes -o name)
+    
+    for node in $nodes; do
+      echo "Labeling node: $node"
+      oc label $node \
+        environment={{ target_environment }} \
+        cluster-name={{ full_cluster_name }} \
+        application={{ resource_tags.Application | default('rosa-infrastructure') }} \
+        managed-by={{ resource_tags.ManagedBy | default('ansible') }} \
+        team={{ resource_tags.Team | default('platform-engineering') }} \
+        criticality={{ resource_tags.Criticality | default('medium') }} \
+        --overwrite
+    done
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when:
+    - resource_tags is defined
+    - oc_login is defined
+    - oc_login is not skipped
+    - oc_login is succeeded
+  register: node_labeling
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels
+
+- name: "Create ConfigMap with cluster metadata"
+  shell: |
+    cat <<EOF | oc apply -f -
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cluster-metadata
+      namespace: openshift-config
+      labels:
+        environment: {{ target_environment }}
+        application: {{ resource_tags.Application | default('rosa-infrastructure') }}
+        managed-by: {{ resource_tags.ManagedBy | default('ansible') }}
+    data:
+      environment: "{{ target_environment }}"
+      cluster-name: "{{ full_cluster_name }}"
+      aws-region: "{{ aws_region }}"
+      application: "{{ resource_tags.Application | default('rosa-infrastructure') }}"
+      team: "{{ resource_tags.Team | default('platform-engineering') }}"
+      cost-center: "{{ resource_tags.CostCenter | default('engineering') }}"
+      project: "{{ resource_tags.Project | default('cloud-native') }}"
+      owner: "{{ resource_tags.Owner | default('devops-team') }}"
+      criticality: "{{ resource_tags.Criticality | default('medium') }}"
+      data-classification: "{{ resource_tags.DataClassification | default('internal') }}"
+      backup-required: "{{ resource_tags.BackupRequired | default('false') }}"
+      created-date: "{{ ansible_date_time.iso8601 }}"
+    EOF
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when:
+    - resource_tags is defined
+    - oc_login is defined
+    - oc_login is not skipped
+    - oc_login is succeeded
+  register: configmap_creation
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels
+
+- name: "Apply annotations to cluster resources"
+  shell: |
+    # Annotate the cluster with metadata
+    oc annotate namespace openshift-config \
+      rosa.cluster/environment={{ target_environment }} \
+      rosa.cluster/created-by=ansible \
+      rosa.cluster/created-date={{ ansible_date_time.iso8601 }} \
+      rosa.cluster/owner={{ resource_tags.Owner | default('devops-team') }} \
+      rosa.cluster/cost-center={{ resource_tags.CostCenter | default('engineering') }} \
+      --overwrite
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when:
+    - resource_tags is defined
+    - oc_login is defined
+    - oc_login is not skipped
+    - oc_login is succeeded
+  register: cluster_annotations
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels
+
+- name: "Display OpenShift labeling summary"
+  debug:
+    msg:
+      - "✅ OpenShift resource labeling completed:"
+      - "  - Namespaces: {{ 'Labeled' if namespace_labeling is succeeded else 'Skipped' }}"
+      - "  - Nodes: {{ 'Labeled' if node_labeling is succeeded else 'Skipped' }}"
+      - "  - ConfigMap: {{ 'Created' if configmap_creation is succeeded else 'Skipped' }}"
+      - "  - Annotations: {{ 'Applied' if cluster_annotations is succeeded else 'Skipped' }}"
+  when: 
+    - oc_login is defined
+    - oc_login is not skipped
+    - oc_login is succeeded
+  tags:
+    - cluster
+    - openshift-labels
+    - k8s-labels

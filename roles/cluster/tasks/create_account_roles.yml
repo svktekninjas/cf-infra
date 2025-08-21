@@ -1,0 +1,78 @@
+# Create ROSA account-wide roles and policies
+---
+- name: "Load environment-specific cluster configuration"
+  include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+  tags:
+    - cluster
+    - account-roles
+
+- name: "Check if account roles already exist"
+  shell: rosa list account-roles
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: existing_account_roles
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - account-roles
+
+- name: "Create account-wide STS roles and policies"
+  shell: |
+    rosa create account-roles \
+      --mode {{ mode }} \
+      --yes
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: account_roles_result
+  when: "'ManagedOpenShift-Installer-Role' not in existing_account_roles.stdout"
+  tags:
+    - cluster
+    - account-roles
+
+- name: "Display account roles creation result"
+  debug:
+    msg:
+      - "✅ Account roles creation completed:"
+      - "{{ account_roles_result.stdout }}"
+  when: account_roles_result is defined and account_roles_result.changed
+  tags:
+    - cluster
+    - account-roles
+
+- name: "Log account roles status"
+  debug:
+    msg: "✅ Account roles already exist - skipping creation"
+  when: "'ManagedOpenShift-Installer-Role' in existing_account_roles.stdout"
+  tags:
+    - cluster
+    - account-roles
+
+- name: "Tag account IAM roles with resource tags"
+  shell: |
+    # List of ROSA account roles to tag
+    ROLES=(
+      "ManagedOpenShift-Installer-Role"
+      "ManagedOpenShift-ControlPlane-Role"
+      "ManagedOpenShift-Worker-Role"
+      "ManagedOpenShift-Support-Role"
+    )
+    
+    for role in "${ROLES[@]}"; do
+      # Check if role exists
+      aws iam get-role --role-name $role >/dev/null 2>&1
+      if [ $? -eq 0 ]; then
+        echo "Tagging IAM role: $role"
+        aws iam tag-role \
+          --role-name $role \
+          --tags Key=app-{{ target_environment }},Value=iam-$role
+      fi
+    done
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  when: resource_tags is defined
+  register: account_roles_tagging
+  tags:
+    - cluster
+    - account-roles
+    - cluster-tags

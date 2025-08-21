@@ -1,0 +1,96 @@
+---
+# Playbook to setup Harness for CF deployment on ROSA cluster
+
+- name: Setup Harness for CF Deployment
+  hosts: localhost
+  gather_facts: yes
+  vars_files:
+    - "../environments/{{ env | default('dev') }}/harness-vars.yml"
+    - "../environments/{{ env | default('dev') }}/vault.yml"
+  vars:
+    target_environment: "{{ env | default('dev') }}"
+    
+  pre_tasks:
+    - name: Display execution information
+      debug:
+        msg: |
+          ========================================
+          Setting up Harness for CF Deployment
+          ========================================
+          Environment: {{ target_environment }}
+          Cluster: {{ rosa_cluster_name | default('cf-rosa-cluster-' ~ target_environment) }}
+          AWS Account (Source): {{ aws_account_id_source | default('818140567777') }}
+          AWS Account (Target): {{ aws_account_id_target | default('606639739464') }}
+          ========================================
+
+    - name: Confirm execution
+      pause:
+        prompt: "Press Enter to continue or Ctrl+C to abort"
+      when: confirm_execution | default(true) | bool
+
+  roles:
+    - role: cf-harness
+      tags:
+        - harness
+        - setup
+
+  post_tasks:
+    - name: Display completion message
+      debug:
+        msg: |
+          ========================================
+          Harness Setup Completed Successfully!
+          ========================================
+          
+          What was configured:
+          ✓ Harness CLI installed and configured
+          ✓ Service accounts created with IRSA
+          ✓ Harness Delegate deployed
+          ✓ Connectors created (GitHub, AWS ECR, ROSA)
+          ✓ Resources applied (services, environments)
+          
+          Next Steps:
+          1. Log into Harness: https://app.harness.io
+          2. Verify delegate is connected
+          3. Test connectors
+          4. Execute your first pipeline
+          
+          Useful Commands:
+          - Check delegate: oc get pods -n harness-delegate-ng
+          - View logs: oc logs -n harness-delegate-ng -l app=harness-delegate
+          - List connectors: harness connector list
+          - List services: harness service list
+          ========================================
+
+    - name: Save setup summary
+      copy:
+        content: |
+          Harness Setup Summary
+          =====================
+          Date: {{ ansible_date_time.iso8601 }}
+          Environment: {{ environment }}
+          
+          Components Installed:
+          - Harness CLI Version: {{ harness_cli_version | default('latest') }}
+          - Delegate Name: {{ harness_delegate_name }}
+          - Delegate Namespace: {{ harness_delegate_namespace }}
+          
+          Service Accounts:
+          - ECR SA: {{ harness_deployer_sa_name }} in {{ harness_deployer_namespaces | join(', ') }}
+          - Delegate SA: {{ harness_delegate_sa_name }} in {{ harness_delegate_namespace }}
+          
+          Connectors:
+          - GitHub: {{ connector_github_id }}
+          - AWS ECR: {{ connector_aws_ecr_id }}
+          - ROSA Cluster: {{ connector_rosa_cluster_id }}
+          
+          Configuration:
+          - Organization: {{ harness_org_id }}
+          - Project: {{ harness_project_id }}
+          - Account: {{ harness_account_id }}
+        dest: "/tmp/harness-setup-summary-{{ environment }}-{{ ansible_date_time.epoch }}.txt"
+        mode: '0644'
+
+    - name: Display summary file location
+      debug:
+        msg: "Setup summary saved to: /tmp/harness-setup-summary-{{ environment }}-{{ ansible_date_time.epoch }}.txt"

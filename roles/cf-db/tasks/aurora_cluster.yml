@@ -1,0 +1,490 @@
+---
+# CF-DB Aurora Cluster Creation with Proper Dependencies
+# Creates Aurora PostgreSQL cluster and instances with tag-based idempotency
+# Dependencies: networking.yml, security.yml must run first
+
+- name: Load environment-specific configuration
+  include_vars: "../../environments/{{ target_environment }}/cf-db.yml"
+  tags:
+    - always
+    - cf-db
+    - aurora
+    - database
+
+# ===== DEPENDENCY VALIDATION =====
+- name: Validate networking dependencies
+  assert:
+    that:
+      - cf_db_vpc_id is defined and cf_db_vpc_id != "" and cf_db_vpc_id != "None"
+      - cf_db_private_subnet_ids is defined and cf_db_private_subnet_ids | length >= 2
+    fail_msg: "Networking dependencies missing. Run networking task first."
+    success_msg: "Networking dependencies satisfied: VPC {{ cf_db_vpc_id }}, {{ cf_db_private_subnet_ids | length }} subnets"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Validate security dependencies
+  assert:
+    that:
+      - cf_db_aurora_sg_id is defined and cf_db_aurora_sg_id != "" and cf_db_aurora_sg_id != "None"
+    fail_msg: "Security dependencies missing. Run security task first."
+    success_msg: "Security dependencies satisfied: Security Group {{ cf_db_aurora_sg_id }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== AURORA CLUSTER PARAMETER GROUP =====
+- name: Check if Aurora cluster parameter group exists
+  shell: |
+    aws rds describe-db-cluster-parameter-groups \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-parameter-group-name {{ cf_db_config.database.cluster_parameter_group_name }} \
+      --query 'DBClusterParameterGroups[0].DBClusterParameterGroupName' \
+      --output text 2>/dev/null || echo "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_cluster_param_group_check
+  failed_when: false
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Create Aurora cluster parameter group
+  shell: |
+    aws rds create-db-cluster-parameter-group \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-parameter-group-name {{ cf_db_config.database.cluster_parameter_group_name }} \
+      --db-parameter-group-family {{ cf_db_config.database.parameter_group_family }} \
+      --description "{{ cf_db_config.database.cluster_parameter_group_description }}" \
+      --tags Key=Name,Value={{ cf_db_config.database.cluster_parameter_group_name }} Key=Component,Value=cf-db Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}
+  when: existing_cluster_param_group_check.stdout == "None" or existing_cluster_param_group_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== AURORA INSTANCE PARAMETER GROUP =====
+- name: Check if Aurora instance parameter group exists
+  shell: |
+    aws rds describe-db-parameter-groups \
+      --region {{ cf_db_config.region }} \
+      --db-parameter-group-name {{ cf_db_config.database.instance_parameter_group_name }} \
+      --query 'DBParameterGroups[0].DBParameterGroupName' \
+      --output text 2>/dev/null || echo "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_instance_param_group_check
+  failed_when: false
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Create Aurora instance parameter group
+  shell: |
+    aws rds create-db-parameter-group \
+      --region {{ cf_db_config.region }} \
+      --db-parameter-group-name {{ cf_db_config.database.instance_parameter_group_name }} \
+      --db-parameter-group-family {{ cf_db_config.database.parameter_group_family }} \
+      --description "{{ cf_db_config.database.instance_parameter_group_description }}" \
+      --tags Key=Name,Value={{ cf_db_config.database.instance_parameter_group_name }} Key=Component,Value=cf-db Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}
+  when: existing_instance_param_group_check.stdout == "None" or existing_instance_param_group_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== AURORA CLUSTER CREATION =====
+- name: Check if Aurora cluster exists (tag-based)
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].{ClusterIdentifier:DBClusterIdentifier,Status:Status,Endpoint:Endpoint}' \
+      --output text 2>/dev/null || echo "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_aurora_cluster_check
+  failed_when: false
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Create Aurora PostgreSQL cluster
+  shell: |
+    aws rds create-db-cluster \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --engine {{ cf_db_config.database.engine }} \
+      --engine-version {{ cf_db_config.database.engine_version }} \
+      --master-username {{ cf_db_config.database.master_username }} \
+      --master-user-password {{ cf_db_config.database.master_password }} \
+      --database-name {{ cf_db_config.database.database_name }} \
+      --db-subnet-group-name {{ cf_db_config.db_subnet_group.name }} \
+      --vpc-security-group-ids {{ cf_db_aurora_sg_id }} \
+      --db-cluster-parameter-group-name {{ cf_db_config.database.cluster_parameter_group_name }} \
+      --backup-retention-period {{ cf_db_config.database.backup_retention_period }} \
+      --preferred-backup-window "{{ cf_db_config.database.preferred_backup_window }}" \
+      --preferred-maintenance-window "{{ cf_db_config.database.preferred_maintenance_window }}" \
+      --port {{ cf_db_config.security_group.db_port }} \
+      --storage-encrypted \
+      {{ '--deletion-protection' if cf_db_config.database.deletion_protection else '--no-deletion-protection' }} \
+      --tags Key=Name,Value={{ cf_db_config.database.cluster_name }} Key=Component,Value=cf-db Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }} Key=DatabaseEngine,Value={{ cf_db_config.database.engine }} \
+      --query 'DBCluster.{ClusterIdentifier:DBClusterIdentifier,Status:Status}' \
+      --output text
+  register: new_aurora_cluster_result
+  when: existing_aurora_cluster_check.stdout == "None" or existing_aurora_cluster_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Get current cluster status (fresh check)
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].{Status:Status,Endpoint:Endpoint}' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: current_cluster_status
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Set Aurora cluster facts
+  set_fact:
+    cf_db_cluster_identifier: "{{ cf_db_config.database.cluster_name }}"
+    cf_db_cluster_status: "{{ current_cluster_status.stdout.split()[1] if current_cluster_status.stdout.split() | length > 1 else 'unknown' }}"
+    cf_db_cluster_endpoint: "{{ current_cluster_status.stdout.split()[0] if current_cluster_status.stdout.split() | length > 0 else '' }}"
+    cf_db_cluster_created: "{{ new_aurora_cluster_result is defined and new_aurora_cluster_result.stdout is defined and new_aurora_cluster_result.stdout != '' }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Display Aurora cluster creation status
+  debug:
+    msg:
+      - "=== Aurora Cluster Status ==="
+      - "Cluster: {{ cf_db_cluster_identifier }}"
+      - "Status: {{ cf_db_cluster_status }}"
+      - "Endpoint: {{ cf_db_cluster_endpoint | default('Not available yet') }}"
+      - "Action: {{ 'Creating new cluster' if cf_db_cluster_created else 'Using existing cluster' }}"
+      - "{% if cf_db_cluster_created %}⏳ Cluster creation initiated - this takes 30-40 minutes{% endif %}"
+      - "{% if cf_db_cluster_status == 'creating' %}⏳ Cluster is still creating - will wait for completion{% endif %}"
+      - "{% if cf_db_cluster_status == 'available' %}✅ Cluster is ready for instances{% endif %}"
+      - "============================"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== CLUSTER WAIT LOGIC =====
+- name: Display cluster creation wait instructions
+  pause:
+    prompt: |
+      ⏳ AURORA CLUSTER CREATION IN PROGRESS ⏳
+      =====================================
+      Cluster: {{ cf_db_config.database.cluster_name }}
+      Status: {{ cf_db_cluster_status }}
+      Region: {{ cf_db_config.region }}
+      
+      Aurora cluster creation typically takes 30-40 minutes.
+      
+      You have two options:
+      1. Press 'C' + Enter to continue waiting (will check status every 2 minutes)
+      2. Press Ctrl+C to abort and re-run later with:
+         ansible-playbook playbooks/main.yml --tags aurora -e "target_environment=dev" -e "aws_profile=sid-KS"
+      
+      The playbook will automatically check cluster status and continue when ready.
+      Press 'C' + Enter to continue...
+  when: cf_db_cluster_status == "creating"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Wait for Aurora cluster to be available (with periodic checks)
+  shell: |
+    echo "⏳ Checking Aurora cluster status..."
+    echo "Initial status: {{ cf_db_cluster_status }}"
+    
+    # Check for up to 60 minutes with 2-minute intervals
+    MAX_CHECKS=30
+    CHECK_COUNT=0
+    
+    while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
+      STATUS=$(aws rds describe-db-clusters \
+        --region {{ cf_db_config.region }} \
+        --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+        --query "DBClusters[0].Status" \
+        --output text 2>/dev/null || echo "error")
+      
+      CURRENT_TIME=$(date "+%H:%M:%S")
+      echo "[$CURRENT_TIME] Check #$((CHECK_COUNT + 1)): Cluster status = $STATUS"
+      
+      if [ "$STATUS" = "available" ]; then
+        echo "✅ Aurora cluster is now available!"
+        exit 0
+      elif [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ]; then
+        echo "❌ Aurora cluster creation failed!"
+        exit 1
+      fi
+      
+      CHECK_COUNT=$((CHECK_COUNT + 1))
+      
+      if [ $CHECK_COUNT -lt $MAX_CHECKS ]; then
+        echo "Still creating... waiting 2 minutes before next check ($(($MAX_CHECKS - $CHECK_COUNT)) checks remaining)"
+        sleep 120
+      fi
+    done
+    
+    echo "⚠️ Timeout reached after 60 minutes. Cluster may still be creating."
+    echo "Current status: $STATUS"
+    exit 2
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: cluster_wait_result
+  when: cf_db_cluster_status == "creating"
+  failed_when: false
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Update cluster status after wait
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].{Status:Status,Endpoint:Endpoint}' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: final_cluster_status
+  when: cf_db_cluster_status == "creating"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Update cluster facts after wait
+  set_fact:
+    cf_db_cluster_status: "{{ final_cluster_status.stdout.split()[2] if final_cluster_status.stdout.split() | length > 2 else 'unknown' }}"
+    cf_db_cluster_endpoint: "{{ final_cluster_status.stdout.split()[1] if final_cluster_status.stdout.split() | length > 1 else '' }}"
+  when: cf_db_cluster_status == "creating" and final_cluster_status is defined
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== INSTANCE STATUS VALIDATION & MANAGEMENT =====
+- name: Check all Aurora instances current status
+  shell: |
+    aws rds describe-db-instances \
+      --region {{ cf_db_config.region }} \
+      --db-instance-identifier {{ item.identifier }} \
+      --query 'DBInstances[0].{InstanceId:DBInstanceIdentifier,Status:DBInstanceStatus,Role:DBInstanceStatus,AZ:AvailabilityZone,Endpoint:Endpoint.Address}' \
+      --output text 2>/dev/null || echo "{{ item.identifier }}	None	None	{{ item.az }}	None"
+  register: aurora_instances_status_check
+  loop: "{{ cf_db_config.database.instances }}"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Display current instance status summary
+  debug:
+    msg:
+      - "=== Aurora Instances Status ==="
+      - "{% for result in aurora_instances_status_check.results %}{{ result.item.identifier }}: {{ result.stdout.split()[1] | default('Not Found') }} ({{ result.stdout.split()[3] | default('Unknown AZ') }}){% endfor %}"
+      - "=============================="
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Verify cluster is available before creating instances
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].Status' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: cluster_ready_check
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Display cluster readiness status
+  debug:
+    msg: "Cluster status before instance creation: {{ cluster_ready_check.stdout }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Create missing Aurora instances
+  shell: |
+    aws rds create-db-instance \
+      --region {{ cf_db_config.region }} \
+      --db-instance-identifier {{ item.item.identifier }} \
+      --db-instance-class {{ item.item.instance_class }} \
+      --engine {{ cf_db_config.database.engine }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --db-parameter-group-name {{ cf_db_config.database.instance_parameter_group_name }} \
+      --availability-zone {{ item.item.az }} \
+      {{ '--publicly-accessible' if cf_db_config.database.publicly_accessible else '--no-publicly-accessible' }} \
+      --tags Key=Name,Value={{ item.item.identifier }} Key=Component,Value=cf-db Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }} Key=InstanceType,Value={{ 'Writer' if ansible_loop.index == 1 else 'Reader' }} \
+      --query 'DBInstance.{InstanceIdentifier:DBInstanceIdentifier,Status:DBInstanceStatus}' \
+      --output text
+  register: new_aurora_instances_result
+  loop: "{{ aurora_instances_status_check.results }}"
+  loop_control:
+    extended: true
+  when: 
+    - cluster_ready_check.stdout == "available"
+    - item.stdout.split()[1] == "None" or item.stdout.split()[1] == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Display instance creation results
+  debug:
+    msg: "Instance creation attempt for {{ item.item.item.identifier }}: {{ 'Created' if item.changed else 'Skipped (already exists or cluster not ready)' }}"
+  loop: "{{ new_aurora_instances_result.results | default([]) }}"
+  when: new_aurora_instances_result is defined
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Get final instance status and validate deployment
+  shell: |
+    aws rds describe-db-instances \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=db-cluster-id,Values={{ cf_db_config.database.cluster_name }}" \
+      --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus,AvailabilityZone,Endpoint.Address]' \
+      --output text
+  register: final_instances_status
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Validate Multi-AZ deployment and instance distribution
+  assert:
+    that:
+      - final_instances_status.stdout_lines | length >= 2
+      - "'us-west-1a' in final_instances_status.stdout"
+      - "'us-west-1b' in final_instances_status.stdout"
+    fail_msg: |
+      ❌ Aurora Multi-AZ deployment validation failed
+      
+      Current instances: {{ final_instances_status.stdout_lines | length }}
+      Expected: At least 2 instances across us-west-1a and us-west-1b
+      
+      Instance Details:
+      {{ final_instances_status.stdout }}
+      
+      Manual Actions:
+      1. Check AWS Console for instance creation status
+      2. Verify AZ availability in us-west-1
+      3. Re-run with: ansible-playbook playbooks/main.yml --tags aurora -e "target_environment=dev" -e "aws_profile=sid-KS"
+    success_msg: "✅ Multi-AZ Aurora deployment validated: {{ final_instances_status.stdout_lines | length }} instances across multiple AZs"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== CLUSTER READINESS CHECK =====
+- name: Check Aurora cluster status
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].Status' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: cluster_status_check
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Get Aurora cluster endpoint
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].Endpoint' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: cluster_endpoint_result
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Set final Aurora cluster facts
+  set_fact:
+    cf_db_cluster_endpoint: "{{ cluster_endpoint_result.stdout }}"
+    cf_db_cluster_port: "{{ cf_db_config.security_group.db_port }}"
+    cf_db_database_name: "{{ cf_db_config.database.database_name }}"
+    cf_db_master_username: "{{ cf_db_config.database.master_username }}"
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+# ===== AURORA DEPLOYMENT SUMMARY =====
+- name: Display Aurora deployment summary
+  debug:
+    msg:
+      - "=== CF-DB Aurora Cluster Complete ==="
+      - "Cluster Identifier: {{ cf_db_cluster_identifier }}"
+      - "Cluster Status: {{ cluster_status_check.stdout }}"
+      - "Cluster Endpoint: {{ cf_db_cluster_endpoint }}"
+      - "Database Port: {{ cf_db_cluster_port }}"
+      - "Database Name: {{ cf_db_database_name }}"
+      - "Master Username: {{ cf_db_master_username }}"
+      - "Engine: {{ cf_db_config.database.engine }} {{ cf_db_config.database.engine_version }}"
+      - "Instances: {{ cf_db_config.database.instances | length }} (Multi-AZ)"
+      - "VPC: {{ cf_db_vpc_id }}"
+      - "Security Group: {{ cf_db_aurora_sg_id }}"
+      - "Subnet Group: {{ cf_db_config.db_subnet_group.name }}"
+      - "Backup Retention: {{ cf_db_config.database.backup_retention_period }} days"
+      - "Storage: Encrypted"
+      - "Cross-VPC Access: {{ 'Enabled via VPC Peering' if cf_db_config.vpc_peering.enabled | default(false) else 'Security Group Rules' }}"
+      - "All resources tagged with Component=cf-db"
+      - "==============================="
+  tags:
+    - cf-db
+    - aurora
+    - database

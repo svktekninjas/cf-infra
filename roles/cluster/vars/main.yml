@@ -1,0 +1,111 @@
+---
+# Cluster role variables - defines all referenced variables
+# These variables are used across cluster tasks and defaults
+
+# Valid environments for cluster deployment
+valid_environments:
+  - dev
+  - test
+  - prod
+
+# Supported AWS regions for ROSA
+supported_aws_regions:
+  - us-east-1
+  - us-east-2
+  - us-west-1
+  - us-west-2
+  - ca-central-1
+  - eu-central-1
+  - eu-west-1
+  - eu-west-2
+  - eu-west-3
+  - eu-north-1
+  - ap-northeast-1
+  - ap-northeast-2
+  - ap-southeast-1
+  - ap-southeast-2
+  - ap-south-1
+  - sa-east-1
+
+# Supported OpenShift versions
+supported_openshift_versions:
+  - "4.17.0"
+  - "4.18.0"
+  - "4.18.20"
+
+# Supported compute machine types
+supported_compute_machine_types:
+  - m5.xlarge
+  - m5n.xlarge
+  - m5.2xlarge
+  - m5.4xlarge
+  - m5n.2xlarge
+  - m5n.4xlarge
+  - c5.xlarge
+  - c5.2xlarge
+  - c5.4xlarge
+
+# Supported storage types
+supported_storage_types:
+  - gp3
+  - gp2
+  - io1
+  - io2
+
+# Minimum requirements per environment
+minimum_requirements:
+  dev:
+    compute_nodes: 2
+    min_replicas: 2
+    max_replicas: 4
+  test:
+    compute_nodes: 3
+    min_replicas: 3
+    max_replicas: 6
+  prod:
+    compute_nodes: 3
+    min_replicas: 3
+    max_replicas: 10
+
+# Timeout values in seconds
+timeout_values:
+  cluster_creation: 3600        # 60 minutes
+  cluster_deletion: 1800        # 30 minutes
+  admin_creation: 300          # 5 minutes
+  tag_application: 600         # 10 minutes
+  label_application: 300       # 5 minutes
+  status_check: 60             # 1 minute
+
+# Cluster creation timeout in minutes (for display)
+cluster_creation_timeout_minutes: 60
+
+# Resource quotas per environment
+resource_quotas:
+  dev:
+    vcpus: 100
+    eips: 5
+    security_groups: 250
+    vpcs: 5
+  test:
+    vcpus: 200
+    eips: 10
+    security_groups: 500
+    vpcs: 10
+  prod:
+    vcpus: 500
+    eips: 20
+    security_groups: 1000
+    vpcs: 20
+
+# Additional cluster features
+cluster_features:
+  enable_spot_instances: false
+  enable_hibernation: false
+  disable_workload_monitoring: false
+  cluster_auto_upgrade: false
+
+# Development settings
+dev_settings:
+  debug_mode: false
+  verbose_logging: false
+  skip_validation: false

@@ -1,0 +1,134 @@
+---
+# Monitoring role variables - defines all referenced variables
+# These variables are used across monitoring tasks and defaults
+
+# Valid environments
+valid_environments:
+  - dev
+  - test
+  - prod
+
+# Default monitoring configuration
+default_monitoring_config:
+  namespace: monitoring
+  enable_rbac: true
+  enable_security_context: true
+  enable_network_policies: false
+
+# Prometheus configuration
+prometheus_config:
+  namespace: monitoring
+  storage_size: 10Gi
+  retention_period: 15d
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+# Grafana configuration
+grafana_config:
+  namespace: monitoring
+  admin_user: admin
+  admin_password: admin123
+  expose_route: true
+  enable_auth: true
+  enable_anonymous: false
+
+# Node Exporter configuration
+node_exporter_config:
+  namespace: monitoring
+  port: 9100
+  enable_collectors:
+    - cpu
+    - memory
+    - disk
+    - network
+    - filesystem
+
+# Container images
+container_images:
+  prometheus: "prom/prometheus:v2.45.0"
+  grafana: "grafana/grafana:10.0.0"
+  node_exporter: "prom/node-exporter:v1.6.0"
+  alertmanager: "prom/alertmanager:v0.26.0"
+
+# Resource requirements per environment
+resource_requirements:
+  dev:
+    prometheus:
+      memory_request: "512Mi"
+      memory_limit: "1Gi"
+      cpu_request: "250m"
+      cpu_limit: "500m"
+    grafana:
+      memory_request: "256Mi"
+      memory_limit: "512Mi"
+      cpu_request: "100m"
+      cpu_limit: "250m"
+    node_exporter:
+      memory_request: "128Mi"
+      memory_limit: "256Mi"
+      cpu_request: "50m"
+      cpu_limit: "100m"
+  test:
+    prometheus:
+      memory_request: "1Gi"
+      memory_limit: "2Gi"
+      cpu_request: "500m"
+      cpu_limit: "1000m"
+    grafana:
+      memory_request: "512Mi"
+      memory_limit: "1Gi"
+      cpu_request: "250m"
+      cpu_limit: "500m"
+    node_exporter:
+      memory_request: "256Mi"
+      memory_limit: "512Mi"
+      cpu_request: "100m"
+      cpu_limit: "200m"
+  prod:
+    prometheus:
+      memory_request: "2Gi"
+      memory_limit: "4Gi"
+      cpu_request: "1000m"
+      cpu_limit: "2000m"
+    grafana:
+      memory_request: "1Gi"
+      memory_limit: "2Gi"
+      cpu_request: "500m"
+      cpu_limit: "1000m"
+    node_exporter:
+      memory_request: "512Mi"
+      memory_limit: "1Gi"
+      cpu_request: "200m"
+      cpu_limit: "400m"
+
+# Timeout values in seconds
+timeout_values:
+  prometheus_startup: 300      # 5 minutes
+  grafana_startup: 180        # 3 minutes
+  node_exporter_startup: 60   # 1 minute
+  route_creation: 60          # 1 minute
+
+# CloudWatch configuration
+enable_cloudwatch_insights: true
+cloudwatch_log_retention_days: 14
+cloudwatch_namespace: "ROSA/Monitoring"
+
+# Alerting configuration
+alerting_config:
+  enable_alerts: false
+  alert_severity: warning
+  notification_channels:
+    - email
+    - slack
+
+# OpenShift log forwarding configuration
+openshift_log_forwarding:
+  enable_cluster_logging: true
+  enable_application_logging: true
+  enable_audit_logging: false
+
+# Development settings
+dev_settings:
+  debug_mode: false
+  verbose_logging: false
+  skip_validation: false

@@ -1,0 +1,89 @@
+# Main tasks file for monitoring role - orchestrates all monitoring setup tasks
+---
+- name: "Load monitoring variables"
+  include_vars: monitoring-variables.yml
+  tags:
+    - monitoring
+
+- name: "Load environment-specific monitoring configuration"
+  include_vars: "{{ ansible_env_path }}/monitoring-config.yml"
+  tags:
+    - monitoring
+
+- name: "Start ROSA Cluster Monitoring Setup for {{ target_environment }} environment"
+  debug:
+    msg: "🎯 Starting ROSA Cluster Monitoring Setup for {{ target_environment }} environment"
+  tags:
+    - monitoring
+
+
+- name: Include monitoring namespace creation
+  include_tasks: create_monitoring_namespace.yml
+  tags:
+    - monitoring
+    - monitoring-setup
+    - namespace
+
+- name: Include RBAC configuration
+  include_tasks: configure_monitoring_rbac.yml
+  when: enable_rbac | default(true)
+  tags:
+    - monitoring
+    - monitoring-setup
+    - rbac
+
+- name: Include Prometheus deployment
+  include_tasks: deploy_prometheus.yml
+  when: prometheus_enabled | default(true)
+  tags:
+    - monitoring
+    - monitoring-prometheus
+    - prometheus
+
+- name: Include Grafana deployment
+  include_tasks: deploy_grafana.yml
+  when: grafana_enabled | default(true)
+  tags:
+    - monitoring
+    - monitoring-grafana
+    - grafana
+
+- name: Include Node Exporter deployment
+  include_tasks: deploy_node_exporter.yml
+  when: node_exporter_enabled | default(true)
+  tags:
+    - monitoring
+    - monitoring-node-exporter
+    - node-exporter
+
+- name: Include ServiceMonitor configuration
+  include_tasks: configure_service_monitors.yml
+  when: prometheus_enabled | default(true)
+  tags:
+    - monitoring
+    - monitoring-servicemonitors
+    - servicemonitors
+
+
+- name: Include Grafana dashboards setup
+  include_tasks: setup_grafana_dashboards.yml
+  when: grafana_enabled | default(true)
+  tags:
+    - monitoring
+    - monitoring-dashboards
+    - dashboards
+
+
+- name: Include monitoring status validation
+  include_tasks: validate_monitoring_setup.yml
+  when: wait_for_monitoring_ready | default(true)
+  tags:
+    - monitoring
+    - monitoring-validate
+    - validation
+
+- name: "Complete ROSA Cluster Monitoring Setup for {{ target_environment }} environment"
+  debug:
+    msg: "✅ ROSA Cluster Monitoring Setup completed successfully for {{ target_environment }} environment!"
+  tags:
+    - monitoring

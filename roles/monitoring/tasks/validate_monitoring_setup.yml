@@ -1,0 +1,150 @@
+# Validate monitoring setup and readiness
+---
+- name: "Wait for monitoring namespace to be ready"
+  shell: |
+    oc get namespace {{ monitoring_namespace }} -o jsonpath='{.status.phase}'
+  register: namespace_status
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  until: namespace_status.stdout == "Active"
+  retries: 10
+  delay: 10
+  failed_when: false
+  tags:
+    - monitoring
+    - validation
+    - namespace
+
+- name: "Wait for Prometheus pod to be ready"
+  shell: |
+    oc get pods -n {{ monitoring_namespace }} -l app=prometheus -o jsonpath='{.items[0].status.phase}'
+  register: prometheus_pod_status
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  until: prometheus_pod_status.stdout == "Running"
+  retries: 30
+  delay: 10
+  failed_when: false
+  when: prometheus_enabled | default(true)
+  tags:
+    - monitoring
+    - validation
+    - prometheus
+
+- name: "Wait for Grafana pod to be ready"
+  shell: |
+    oc get pods -n {{ monitoring_namespace }} -l app=grafana -o jsonpath='{.items[0].status.phase}'
+  register: grafana_pod_status
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  until: grafana_pod_status.stdout == "Running"
+  retries: 20
+  delay: 10
+  failed_when: false
+  when: grafana_enabled | default(true)
+  tags:
+    - monitoring
+    - validation
+    - grafana
+
+- name: "Check Node Exporter DaemonSet readiness"
+  shell: |
+    oc get daemonset node-exporter -n {{ monitoring_namespace }} -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}'
+  register: node_exporter_status
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  failed_when: false
+  when: node_exporter_enabled | default(true)
+  tags:
+    - monitoring
+    - validation
+    - node-exporter
+
+- name: "Validate Prometheus is scraping targets"
+  shell: |
+    oc exec -n {{ monitoring_namespace }} deployment/prometheus -c prometheus -- \
+      wget -qO- http://localhost:9090/api/v1/targets | grep -o '"health":"up"' | wc -l
+  register: prometheus_targets
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  failed_when: false
+  when: prometheus_enabled | default(true)
+  tags:
+    - monitoring
+    - validation
+    - prometheus
+
+- name: "Test Grafana API endpoint"
+  shell: |
+    oc exec -n {{ monitoring_namespace }} deployment/grafana -c grafana -- \
+      curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health
+  register: grafana_health
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  failed_when: false
+  when: grafana_enabled | default(true)
+  tags:
+    - monitoring
+    - validation
+    - grafana
+
+
+- name: "Get monitoring services status"
+  shell: |
+    oc get svc -n {{ monitoring_namespace }} --no-headers | awk '{print $1 ":" $2}'
+  register: monitoring_services
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  failed_when: false
+  tags:
+    - monitoring
+    - validation
+    - services
+
+- name: "Get monitoring routes status"
+  shell: |
+    oc get routes -n {{ monitoring_namespace }} --no-headers | awk '{print $1 ":" $2}' || echo "No routes found"
+  register: monitoring_routes
+  environment:
+    AWS_PROFILE: "{{ aws_profile }}"
+  failed_when: false
+  tags:
+    - monitoring
+    - validation
+    - routes
+
+- name: "Display comprehensive monitoring validation results"
+  debug:
+    msg:
+      - "✅ ROSA Monitoring Validation Report:"
+      - ""
+      - "🏗️  Infrastructure Status:"
+      - "  - Namespace: {{ namespace_status.stdout if namespace_status.stdout else 'Error' }}"
+      - "  - Environment: {{ target_environment }}"
+      - "  - Cluster: {{ full_cluster_name }}"
+      - ""
+      - "🚀 Component Status:"
+      - "  - Prometheus Pod: {{ prometheus_pod_status.stdout if prometheus_enabled and prometheus_pod_status.stdout else 'Disabled/Error' }}"
+      - "  - Grafana Pod: {{ grafana_pod_status.stdout if grafana_enabled and grafana_pod_status.stdout else 'Disabled/Error' }}"
+      - "  - Node Exporter: {{ node_exporter_status.stdout if node_exporter_enabled and node_exporter_status.stdout else 'Disabled/Error' }}"
+      - ""
+      - "📊 Metrics & Monitoring:"
+      - "  - Prometheus Targets: {{ prometheus_targets.stdout if prometheus_enabled and prometheus_targets.stdout else 'N/A' }} targets up"
+      - "  - Grafana Health: {{ 'OK' if grafana_enabled and grafana_health.stdout == '200' else 'Error/Disabled' }}"
+      - ""
+      - "🌐 Network Access:"
+      - "  - Services: {{ monitoring_services.stdout_lines | join(', ') if monitoring_services.stdout_lines else 'None found' }}"
+      - "  - Routes: {{ monitoring_routes.stdout_lines | join(', ') if monitoring_routes.stdout_lines else 'None found' }}"
+      - ""
+      - "🔍 Health Summary:"
+      - "  - Overall Status: {{ 'Healthy' if (namespace_status.stdout == 'Active' and (not prometheus_enabled or prometheus_pod_status.stdout == 'Running') and (not grafana_enabled or grafana_pod_status.stdout == 'Running')) else 'Issues Detected' }}"
+      - "  - Monitoring Ready: {{ 'Yes' if (prometheus_targets.stdout|int > 0 if prometheus_targets.stdout else False) or not prometheus_enabled else 'No' }}"
+      - ""
+      - "📋 Next Steps:"
+      - "  1. Access Grafana: oc port-forward svc/grafana 3000:3000 -n {{ monitoring_namespace }}"
+      - "  2. Access Prometheus: oc port-forward svc/prometheus 9090:9090 -n {{ monitoring_namespace }}"
+      - "  3. Monitor cluster: Use Grafana dashboards for real-time monitoring"
+      - "  4. View metrics: http://localhost:9090 (Prometheus) and http://localhost:3000 (Grafana)"
+  tags:
+    - monitoring
+    - validation

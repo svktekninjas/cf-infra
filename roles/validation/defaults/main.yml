@@ -1,0 +1,58 @@
+---
+# Default variables for validation role
+
+# Supported AWS regions for ROSA
+supported_aws_regions:
+  - us-east-1      # N. Virginia
+  - us-east-2      # Ohio
+  - us-west-1      # N. California
+  - us-west-2      # Oregon
+  - ca-central-1   # Canada (Montreal)
+  - eu-central-1   # Frankfurt
+  - eu-west-1      # Ireland
+  - eu-west-2      # London
+  - eu-west-3      # Paris
+  - eu-north-1     # Stockholm
+  - eu-south-1     # Milan
+  - ap-northeast-1 # Tokyo
+  - ap-northeast-2 # Seoul
+  - ap-northeast-3 # Osaka
+  - ap-southeast-1 # Singapore
+  - ap-southeast-2 # Sydney
+  - ap-southeast-3 # Jakarta
+  - ap-south-1     # Mumbai
+  - sa-east-1      # São Paulo
+  - me-south-1     # Bahrain
+  - af-south-1     # Cape Town
+
+# Minimum required CLI versions
+min_aws_cli_version: "2.0.0"
+min_rosa_cli_version: "1.2.0"
+min_oc_cli_version: "4.14.0"
+
+# Debug settings
+enable_debug_logging: false
+
+# Validation timeout settings
+validation_timeout: 300  # 5 minutes in seconds
+validation_retries: 3
+
+# Required AWS permissions for ROSA
+required_aws_permissions:
+  - ec2:*
+  - iam:*
+  - s3:*
+  - elasticloadbalancing:*
+  - cloudwatch:*
+  - sts:AssumeRole
+  - sts:GetCallerIdentity
+
+# Required resource quotas
+required_quotas:
+  vcpus: 100
+  eips: 5
+  security_groups: 250
+  vpcs: 5
+
+# Default environment if not specified
+default_environment: dev

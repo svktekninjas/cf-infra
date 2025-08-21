@@ -1,0 +1,236 @@
+---
+# CF-DB Network Connectivity Task
+# This task creates VPC peering connection between Aurora VPC and ROSA cluster VPC
+# Enables cross-VPC database connectivity for microservices
+# Tags: ansible-playbook -t nw-connectivity (individual task)
+#       ansible-playbook -t cf-db (full role including this task)
+
+- name: Load role variables for VPC peering
+  include_vars: "{{ role_path }}/vars/main.yml"
+  tags:
+    - always
+    - cf-db
+    - nw-connectivity
+
+- name: Discover ROSA cluster VPC in us-east-1
+  shell: |
+    aws ec2 describe-vpcs \
+      --region us-east-1 \
+      --filters "Name=tag:Name,Values=*rosa*" \
+      --query 'Vpcs[0].[VpcId,CidrBlock]' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_vpc_discovery
+  failed_when: false
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Discover ROSA cluster VPC (alternative search)
+  shell: |
+    aws ec2 describe-vpcs \
+      --region us-east-1 \
+      --filters "Name=cidr-block-association.cidr-block,Values=10.0.0.0/16" \
+      --query 'Vpcs[0].[VpcId,CidrBlock]' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_vpc_discovery_alt
+  failed_when: false
+  when: rosa_vpc_discovery.stdout == "None\tNone" or rosa_vpc_discovery.rc != 0
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Set discovered ROSA VPC facts
+  set_fact:
+    discovered_rosa_vpc_id: "{{ (rosa_vpc_discovery.stdout.split('\t')[0] if rosa_vpc_discovery.stdout != 'None\tNone' else rosa_vpc_discovery_alt.stdout.split('\t')[0]) | default('') }}"
+    discovered_rosa_vpc_cidr: "{{ (rosa_vpc_discovery.stdout.split('\t')[1] if rosa_vpc_discovery.stdout != 'None\tNone' else rosa_vpc_discovery_alt.stdout.split('\t')[1]) | default('10.0.0.0/16') }}"
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Set Aurora VPC facts from current deployment
+  set_fact:
+    aurora_vpc_id: "{{ cf_db_config.vpc_id | default(cf_db_created_vpc_id) }}"
+    aurora_vpc_cidr: "{{ cf_db_config.vpc_cidr | default('172.31.0.0/16') }}"
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Display VPC peering setup summary with discovered VPCs
+  debug:
+    msg:
+      - "=== VPC Peering Network Connectivity Setup ==="
+      - "🔍 Aurora VPC (us-west-1): {{ aurora_vpc_id }}"
+      - "🔍 Aurora VPC CIDR: {{ aurora_vpc_cidr }}"
+      - "🔍 ROSA VPC (us-east-1): {{ discovered_rosa_vpc_id if discovered_rosa_vpc_id else 'Not found - will skip peering' }}"
+      - "🔍 ROSA VPC CIDR: {{ discovered_rosa_vpc_cidr if discovered_rosa_vpc_id else 'N/A' }}"
+      - "📝 Environment: {{ cf_db_config.common_tags.Environment }}"
+      - "=============================================="
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Validate dynamic VPC peering configuration
+  assert:
+    that:
+      - aurora_vpc_id is defined and aurora_vpc_id != ""
+      - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
+    fail_msg: "Dynamic VPC discovery failed. Aurora VPC: {{ aurora_vpc_id | default('not found') }}, ROSA VPC: {{ discovered_rosa_vpc_id | default('not found') }}"
+    success_msg: "Dynamic VPC peering configuration validated successfully."
+  when: cf_db_config.vpc_peering.enabled | default(true)
+  tags:
+    - cf-db
+    - nw-connectivity
+    - validation
+
+- name: Skip VPC peering if ROSA VPC not found
+  debug:
+    msg:
+      - "⚠️  ROSA VPC not found in us-east-1 region"
+      - "💡 VPC peering will be skipped for now"
+      - "🔧 You can manually set up VPC peering later using:"
+      - "   Aurora VPC: {{ aurora_vpc_id }} ({{ aurora_vpc_cidr }})"
+      - "   ROSA VPC: [to be determined after cluster creation]"
+  when: not (discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != "")
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Create VPC peering connection with discovered VPCs
+  shell: |
+    aws ec2 create-vpc-peering-connection \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ aurora_vpc_id }} \
+      --peer-vpc-id {{ discovered_rosa_vpc_id }} \
+      --peer-region us-east-1 \
+      --tag-specifications 'ResourceType=vpc-peering-connection,Tags=[{Key=Name,Value={{ cf_db_config.vpc_peering.connection_name | default("cf-aurora-rosa-peering-" + cf_db_config.common_tags.Environment) }}},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=Component,Value=NetworkConnectivity},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}},{Key=Purpose,Value=Aurora-ROSA-VPC-Peering}]' \
+      --query 'VpcPeeringConnection.VpcPeeringConnectionId' \
+      --output text
+  register: vpc_peering_connection_result
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(true)
+    - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Set VPC peering connection ID fact
+  set_fact:
+    vpc_peering_connection_id: "{{ vpc_peering_connection_result.stdout }}"
+  when: vpc_peering_connection_result is defined and vpc_peering_connection_result.stdout is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Accept VPC peering connection
+  shell: |
+    aws ec2 accept-vpc-peering-connection \
+      --region us-east-1 \
+      --vpc-peering-connection-id {{ vpc_peering_connection_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  when: 
+    - vpc_peering_connection_id is defined
+    - cf_db_config.vpc_peering.auto_accept | default(true)
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Discover ROSA route tables for peering routes
+  shell: |
+    aws ec2 describe-route-tables \
+      --region us-east-1 \
+      --filters "Name=vpc-id,Values={{ discovered_rosa_vpc_id }}" \
+      --query 'RouteTables[*].RouteTableId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_route_tables_discovery
+  when: 
+    - vpc_peering_connection_id is defined
+    - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Add routes to Aurora VPC route table for ROSA traffic
+  shell: |
+    aws ec2 create-route \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ private_route_table_id }} \
+      --destination-cidr-block {{ discovered_rosa_vpc_cidr }} \
+      --vpc-peering-connection-id {{ vpc_peering_connection_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  when: 
+    - vpc_peering_connection_id is defined
+    - private_route_table_id is defined
+    - discovered_rosa_vpc_cidr is defined
+  failed_when: false
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Add routes to ROSA VPC route tables for Aurora traffic
+  shell: |
+    aws ec2 create-route \
+      --region us-east-1 \
+      --route-table-id {{ item }} \
+      --destination-cidr-block {{ aurora_vpc_cidr }} \
+      --vpc-peering-connection-id {{ vpc_peering_connection_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  loop: "{{ rosa_route_tables_discovery.stdout.split() if rosa_route_tables_discovery is defined and rosa_route_tables_discovery.stdout else [] }}"
+  when: 
+    - vpc_peering_connection_id is defined
+    - rosa_route_tables_discovery is defined
+    - aurora_vpc_cidr is defined
+  failed_when: false
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Display VPC peering completion summary
+  debug:
+    msg:
+      - "✅ VPC peering setup completed successfully!"
+      - "🔗 Peering Connection ID: {{ vpc_peering_connection_id | default('N/A') }}"
+      - "🌐 Aurora VPC: {{ aurora_vpc_id }} ({{ aurora_vpc_cidr }})"
+      - "🌐 ROSA VPC: {{ discovered_rosa_vpc_id | default('N/A') }} ({{ discovered_rosa_vpc_cidr | default('N/A') }})"
+      - "📊 Cross-VPC connectivity enabled for database access"
+      - "🧪 Test connectivity: ping/telnet from ROSA pods to Aurora endpoints"
+  when: vpc_peering_connection_id is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Create VPC peering summary output file
+  copy:
+    content: |
+      {
+        "vpc_peering_summary": {
+          "connection_id": "{{ vpc_peering_connection_id | default('N/A') }}",
+          "aurora_vpc": {
+            "vpc_id": "{{ aurora_vpc_id }}",
+            "cidr": "{{ aurora_vpc_cidr }}",
+            "region": "{{ cf_db_config.region }}"
+          },
+          "rosa_vpc": {
+            "vpc_id": "{{ discovered_rosa_vpc_id | default('N/A') }}",
+            "cidr": "{{ discovered_rosa_vpc_cidr | default('N/A') }}",
+            "region": "us-east-1"
+          },
+          "status": "{{ 'completed' if vpc_peering_connection_id is defined else 'skipped' }}",
+          "created_at": "{{ ansible_date_time.iso8601 }}",
+          "environment": "{{ cf_db_config.common_tags.Environment }}"
+        }
+      }
+    dest: "./outputs/vpc-peering-{{ cf_db_config.common_tags.Environment }}.json"
+  tags:
+    - cf-db
+    - nw-connectivity

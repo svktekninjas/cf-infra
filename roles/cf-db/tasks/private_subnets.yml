@@ -1,0 +1,134 @@
+---
+# Private Subnets Creation Tasks (AWS CLI) with Idempotency
+# Creates private subnets only if they don't already exist
+
+- name: Load environment-specific configuration for private subnets
+  include_vars: "../../environments/{{ target_environment }}/cf-db.yml"
+  tags:
+    - always
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Discover VPC ID if not set
+  shell: |
+    aws ec2 describe-vpcs \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=cidr-block,Values={{ cf_db_config.vpc_cidr }}" "Name=state,Values=available" \
+      --query 'Vpcs[0].VpcId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: discovered_vpc_result
+  when: cf_db_config.vpc_id == "" and cf_db_created_vpc_id is not defined
+  failed_when: false
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Set VPC ID fact for private subnets
+  set_fact:
+    working_vpc_id: "{{ cf_db_config.vpc_id if cf_db_config.vpc_id != '' else (cf_db_created_vpc_id if cf_db_created_vpc_id is defined else discovered_vpc_result.stdout) }}"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Check existing private subnets for each configured subnet
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ working_vpc_id }}" "Name=cidr-block,Values={{ item.cidr }}" "Name=state,Values=available" \
+      --query 'Subnets[0].SubnetId' \
+      --output text
+  register: existing_private_subnets_check
+  loop: "{{ cf_db_config.private_subnets }}"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Display private subnet check results
+  debug:
+    msg:
+      - "🔍 Checking subnet: {{ item.item.name }}"
+      - "   CIDR: {{ item.item.cidr }} in {{ item.item.az }}"
+      - "   Status: {{ 'Exists (' + item.stdout + ')' if item.stdout != 'None' and item.stdout != '' else 'Will create' }}"
+      - "   Raw stdout: '{{ item.stdout }}'"
+      - "   Return code: {{ item.rc }}"
+  loop: "{{ existing_private_subnets_check.results }}"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Create private subnets only if they don't exist
+  shell: |
+    aws ec2 create-subnet \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ working_vpc_id }} \
+      --cidr-block {{ item.item.cidr }} \
+      --availability-zone {{ item.item.az }} \
+      --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value={{ item.item.name }}},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=Component,Value={{ cf_db_config.common_tags.Component }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}},{Key=Type,Value=Private}]' \
+      --query 'Subnet.SubnetId' \
+      --output text
+  register: new_private_subnets_result
+  loop: "{{ existing_private_subnets_check.results }}"
+  when: item.stdout == "None" or item.stdout == ""
+  failed_when: false  # Don't fail if subnet already exists
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Get all private subnet IDs using AWS CLI
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ working_vpc_id }}" "Name=tag:Type,Values=Private" "Name=state,Values=available" \
+      --query 'Subnets[].SubnetId' \
+      --output text
+  register: all_private_subnets_result
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Set private subnet IDs fact from AWS CLI output
+  set_fact:
+    private_subnet_ids: "{{ all_private_subnets_result.stdout.split() }}"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Display private subnets summary
+  debug:
+    msg:
+      - "✅ Private Subnets Ready:"
+      - "   Total subnets found: {{ private_subnet_ids | length }}"
+      - "   Subnet IDs: {{ private_subnet_ids | join(', ') }}"
+      - "   Multi-AZ deployment: {{ 'Yes' if private_subnet_ids | length > 1 else 'No' }}"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking
+
+- name: Verify we have the required number of subnets
+  assert:
+    that:
+      - private_subnet_ids | length >= 2
+    fail_msg: "❌ Expected at least 2 private subnets for Multi-AZ deployment, but found {{ private_subnet_ids | length }}"
+    success_msg: "✅ Private subnets ready for Aurora Multi-AZ deployment"
+  tags:
+    - cf-db
+    - private-subnets
+    - networking

@@ -1,0 +1,85 @@
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# Ansible
+*.retry
+.ansible/
+.cache/
+ansible.log
+
+# Secrets and sensitive files
+vault.yml
+*vault*.yml
+*.pem
+*.key
+*.crt
+.secrets
+.secrets.baseline
+*.secret
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Testing
+.molecule/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Binaries and downloads
+harness-darwin-*
+harness-linux-*
+harness-windows-*
+*.tar.gz
+*.zip
+*.exe
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+tmp/
+temp/
+
+# Reports
+*-report.txt
+*-report.md
+quality-report.md
+
+# Terraform (if used)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

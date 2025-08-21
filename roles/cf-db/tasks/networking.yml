@@ -1,0 +1,643 @@
+---
+# Consolidated CF-DB Networking Tasks with Tag-Based Idempotency
+# Creates: VPC, Subnets, IGW, NAT Gateway, Route Tables, VPC Peering (Cross-Region)
+# All resources tagged with 'Component=cf-db' for proper idempotency
+
+- name: Load environment-specific configuration
+  include_vars: "../../environments/{{ target_environment }}/cf-db.yml"
+  tags:
+    - always
+    - cf-db
+    - networking
+
+# ===== VPC MANAGEMENT =====
+- name: Check if VPC exists (tag-based idempotency)
+  shell: |
+    aws ec2 describe-vpcs \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=cidr-block,Values={{ cf_db_config.vpc_cidr }}" "Name=tag:Component,Values=cf-db" "Name=tag:Environment,Values={{ cf_db_config.common_tags.Environment }}" "Name=state,Values=available" \
+      --query 'Vpcs[0].VpcId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_vpc_check
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+
+- name: Create VPC if not exists
+  shell: |
+    aws ec2 create-vpc \
+      --region {{ cf_db_config.region }} \
+      --cidr-block {{ cf_db_config.vpc_cidr }} \
+      --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=cf-db-vpc-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'Vpc.VpcId' \
+      --output text
+  register: new_vpc_result
+  when: existing_vpc_check.stdout == "None" or existing_vpc_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Set VPC ID fact
+  set_fact:
+    cf_db_vpc_id: "{{ existing_vpc_check.stdout if existing_vpc_check.stdout != 'None' and existing_vpc_check.stdout != '' else new_vpc_result.stdout }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Enable DNS attributes for VPC
+  shell: |
+    aws ec2 modify-vpc-attribute \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --{{ item }}
+  loop:
+    - enable-dns-hostnames
+    - enable-dns-support
+  when: existing_vpc_check.stdout == "None" or existing_vpc_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+# ===== INTERNET GATEWAY MANAGEMENT =====
+- name: Check if Internet Gateway exists
+  shell: |
+    aws ec2 describe-internet-gateways \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=attachment.vpc-id,Values={{ cf_db_vpc_id }}" "Name=tag:Component,Values=cf-db" \
+      --query 'InternetGateways[0].InternetGatewayId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_igw_check
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+
+- name: Create and attach Internet Gateway
+  shell: |
+    IGW_ID=$(aws ec2 create-internet-gateway \
+      --region {{ cf_db_config.region }} \
+      --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=cf-db-igw-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'InternetGateway.InternetGatewayId' \
+      --output text)
+    aws ec2 attach-internet-gateway \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --internet-gateway-id $IGW_ID
+    echo $IGW_ID
+  register: new_igw_result
+  when: existing_igw_check.stdout == "None" or existing_igw_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Set IGW ID fact
+  set_fact:
+    cf_db_igw_id: "{{ existing_igw_check.stdout if existing_igw_check.stdout != 'None' and existing_igw_check.stdout != '' else new_igw_result.stdout }}"
+  tags:
+    - cf-db
+    - networking
+
+# ===== PUBLIC SUBNET MANAGEMENT =====
+- name: Check if public subnet exists
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=cidr-block,Values={{ cf_db_config.public_subnet_cidr }}" "Name=tag:Component,Values=cf-db" "Name=state,Values=available" \
+      --query 'Subnets[0].SubnetId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_public_subnet_check
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+
+- name: Create public subnet
+  shell: |
+    aws ec2 create-subnet \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --cidr-block {{ cf_db_config.public_subnet_cidr }} \
+      --availability-zone {{ cf_db_config.availability_zones[0] }} \
+      --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=cf-db-public-subnet-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Type,Value=Public},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'Subnet.SubnetId' \
+      --output text
+  register: new_public_subnet_result
+  when: existing_public_subnet_check.stdout == "None" or existing_public_subnet_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Set public subnet ID fact
+  set_fact:
+    cf_db_public_subnet_id: "{{ existing_public_subnet_check.stdout if existing_public_subnet_check.stdout != 'None' and existing_public_subnet_check.stdout != '' else new_public_subnet_result.stdout }}"
+  tags:
+    - cf-db
+    - networking
+
+# ===== PRIVATE SUBNETS MANAGEMENT =====
+- name: Check existing private subnets
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=cidr-block,Values={{ item.cidr }}" "Name=tag:Component,Values=cf-db" "Name=state,Values=available" \
+      --query 'Subnets[0].SubnetId' \
+      --output text
+  register: existing_private_subnets_check
+  loop: "{{ cf_db_config.private_subnets }}"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+
+- name: Create private subnets
+  shell: |
+    aws ec2 create-subnet \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --cidr-block {{ item.item.cidr }} \
+      --availability-zone {{ item.item.az }} \
+      --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value={{ item.item.name }}},{Key=Component,Value=cf-db},{Key=Type,Value=Private},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'Subnet.SubnetId' \
+      --output text
+  register: new_private_subnets_result
+  loop: "{{ existing_private_subnets_check.results }}"
+  when: item.stdout == "None" or item.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Get all private subnet IDs (always discover for idempotency)
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=tag:Component,Values=cf-db" "Name=tag:Type,Values=Private" "Name=state,Values=available" \
+      --query 'Subnets[].SubnetId' \
+      --output text
+  register: all_private_subnets_result
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Set private subnet IDs fact
+  set_fact:
+    cf_db_private_subnet_ids: "{{ all_private_subnets_result.stdout.split() if all_private_subnets_result.stdout != '' else [] }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Debug private subnet discovery
+  debug:
+    msg:
+      - "Private subnets discovered: {{ cf_db_private_subnet_ids | length }} subnets"
+      - "Subnet IDs: {{ cf_db_private_subnet_ids | join(', ') }}"
+  tags:
+    - cf-db
+    - networking
+
+# ===== NAT GATEWAY MANAGEMENT =====
+- name: Check if NAT Gateway exists (tag-based)
+  shell: |
+    aws ec2 describe-nat-gateways \
+      --region {{ cf_db_config.region }} \
+      --filter "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=tag:Component,Values=cf-db" "Name=state,Values=available" \
+      --query 'NatGateways[0].[NatGatewayId,NatGatewayAddresses[0].AllocationId]' \
+      --output text
+  register: existing_nat_gateway_check
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+
+- name: Create Elastic IP and NAT Gateway if not exists
+  shell: |
+    # Create EIP
+    EIP_ALLOC=$(aws ec2 allocate-address \
+      --region {{ cf_db_config.region }} \
+      --domain vpc \
+      --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=cf-db-nat-eip-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'AllocationId' \
+      --output text)
+    
+    # Create NAT Gateway
+    NAT_GW=$(aws ec2 create-nat-gateway \
+      --region {{ cf_db_config.region }} \
+      --subnet-id {{ cf_db_public_subnet_id }} \
+      --allocation-id $EIP_ALLOC \
+      --tag-specifications 'ResourceType=natgateway,Tags=[{Key=Name,Value=cf-db-nat-gateway-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'NatGateway.NatGatewayId' \
+      --output text)
+    
+    echo "$NAT_GW	$EIP_ALLOC"
+  register: new_nat_gateway_result
+  when: existing_nat_gateway_check.stdout == "None" or existing_nat_gateway_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Debug NAT Gateway discovery results
+  debug:
+    msg:
+      - "Existing NAT Gateway check result: '{{ existing_nat_gateway_check.stdout }}'"
+      - "Split values: {{ existing_nat_gateway_check.stdout.split() if existing_nat_gateway_check.stdout != 'None' and existing_nat_gateway_check.stdout != '' else ['No existing NAT Gateway'] }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Set NAT Gateway facts
+  set_fact:
+    cf_db_nat_gateway_id: "{{ existing_nat_gateway_check.stdout.split()[0] if existing_nat_gateway_check.stdout != 'None' and existing_nat_gateway_check.stdout != '' else new_nat_gateway_result.stdout.split()[0] }}"
+    cf_db_eip_allocation_id: "{{ existing_nat_gateway_check.stdout.split()[1] if existing_nat_gateway_check.stdout != 'None' and existing_nat_gateway_check.stdout != '' else new_nat_gateway_result.stdout.split()[1] }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Wait for NAT Gateway to be available (only for newly created)
+  shell: |
+    aws ec2 wait nat-gateway-available \
+      --region {{ cf_db_config.region }} \
+      --nat-gateway-ids {{ cf_db_nat_gateway_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  when: 
+    - new_nat_gateway_result is defined 
+    - new_nat_gateway_result is not skipped
+    - new_nat_gateway_result.stdout is defined
+    - new_nat_gateway_result.stdout != ""
+  tags:
+    - cf-db
+    - networking
+
+# ===== ROUTE TABLE MANAGEMENT =====
+- name: Check if private route table exists
+  shell: |
+    aws ec2 describe-route-tables \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=tag:Component,Values=cf-db" "Name=tag:Type,Values=Private" \
+      --query 'RouteTables[0].RouteTableId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_private_rt_check
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+
+- name: Create private route table
+  shell: |
+    aws ec2 create-route-table \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value={{ cf_db_config.route_table.name }}},{Key=Component,Value=cf-db},{Key=Type,Value=Private},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'RouteTable.RouteTableId' \
+      --output text
+  register: new_private_rt_result
+  when: existing_private_rt_check.stdout == "None" or existing_private_rt_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Set private route table ID fact
+  set_fact:
+    cf_db_private_rt_id: "{{ existing_private_rt_check.stdout if existing_private_rt_check.stdout != 'None' and existing_private_rt_check.stdout != '' else new_private_rt_result.stdout }}"
+  tags:
+    - cf-db
+    - networking
+
+- name: Add NAT Gateway route to private route table
+  shell: |
+    aws ec2 create-route \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ cf_db_private_rt_id }} \
+      --destination-cidr-block 0.0.0.0/0 \
+      --nat-gateway-id {{ cf_db_nat_gateway_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Route might already exist
+  tags:
+    - cf-db
+    - networking
+
+- name: Associate private subnets with private route table
+  shell: |
+    aws ec2 associate-route-table \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ cf_db_private_rt_id }} \
+      --subnet-id {{ item }}
+  loop: "{{ cf_db_private_subnet_ids }}"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Association might already exist
+  tags:
+    - cf-db
+    - networking
+
+- name: Add IGW route to main route table
+  shell: |
+    MAIN_RT=$(aws ec2 describe-route-tables \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=association.main,Values=true" \
+      --query 'RouteTables[0].RouteTableId' \
+      --output text)
+    aws ec2 create-route \
+      --region {{ cf_db_config.region }} \
+      --route-table-id $MAIN_RT \
+      --destination-cidr-block 0.0.0.0/0 \
+      --gateway-id {{ cf_db_igw_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Route might already exist
+  tags:
+    - cf-db
+    - networking
+
+# ===== VPC PEERING MANAGEMENT (CROSS-REGION: US-WEST-1 ↔ US-EAST-1) =====
+# Dynamic discovery of ROSA cluster resources using tags
+
+- name: Discover ROSA VPC in us-east-1 using tags
+  shell: |
+    aws ec2 describe-vpcs \
+      --region us-east-1 \
+      --filters "Name=tag:red-hat-clustertype,Values=rosa" "Name=state,Values=available" \
+      --query 'Vpcs[0].VpcId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_vpc_discovery
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Get ROSA VPC CIDR block
+  shell: |
+    aws ec2 describe-vpcs \
+      --region us-east-1 \
+      --vpc-ids {{ rosa_vpc_discovery.stdout }} \
+      --query 'Vpcs[0].CidrBlock' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_vpc_cidr_discovery
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Discover ROSA private route table in us-east-1
+  shell: |
+    aws ec2 describe-route-tables \
+      --region us-east-1 \
+      --filters "Name=vpc-id,Values={{ rosa_vpc_discovery.stdout }}" "Name=association.main,Values=false" \
+      --query 'RouteTables[?Routes[?NatGatewayId!=null]]|[0].RouteTableId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_route_table_discovery
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Set discovered ROSA facts
+  set_fact:
+    rosa_vpc_id: "{{ rosa_vpc_discovery.stdout }}"
+    rosa_vpc_cidr: "{{ rosa_vpc_cidr_discovery.stdout }}"  
+    rosa_route_table_id: "{{ rosa_route_table_discovery.stdout }}"
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Display discovered ROSA resources
+  debug:
+    msg:
+      - "=== Discovered ROSA Resources ==="
+      - "ROSA VPC ID: {{ rosa_vpc_id | default('Not found') }}"
+      - "ROSA VPC CIDR: {{ rosa_vpc_cidr | default('Not found') }}"
+      - "ROSA Route Table: {{ rosa_route_table_id | default('Not found') }}"
+      - "Aurora VPC ID: {{ cf_db_vpc_id }}"
+      - "Aurora VPC CIDR: {{ cf_db_config.vpc_cidr }}"
+      - "==============================="
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Validate ROSA resource discovery
+  assert:
+    that:
+      - rosa_vpc_id is defined and rosa_vpc_id != "None" and rosa_vpc_id != ""
+      - rosa_route_table_id is defined and rosa_route_table_id != "None" and rosa_route_table_id != ""
+    fail_msg: "ROSA VPC or route table not found. Ensure ROSA cluster exists in us-east-1 with proper tags."
+    success_msg: "ROSA resources discovered successfully: VPC {{ rosa_vpc_id }}, Route Table {{ rosa_route_table_id }}"
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Check if VPC peering connection exists
+  shell: |
+    aws ec2 describe-vpc-peering-connections \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=requester-vpc-info.vpc-id,Values={{ cf_db_vpc_id }}" "Name=accepter-vpc-info.vpc-id,Values={{ rosa_vpc_id }}" "Name=tag:Component,Values=cf-db" "Name=status-code,Values=active,pending-acceptance" \
+      --query 'VpcPeeringConnections[0].VpcPeeringConnectionId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_peering_check
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Create VPC peering connection (Cross-Region)
+  shell: |
+    aws ec2 create-vpc-peering-connection \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --peer-vpc-id {{ rosa_vpc_id }} \
+      --peer-region us-east-1 \
+      --tag-specifications 'ResourceType=vpc-peering-connection,Tags=[{Key=Name,Value=cf-aurora-rosa-peering-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'VpcPeeringConnection.VpcPeeringConnectionId' \
+      --output text
+  register: new_peering_result
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - existing_peering_check.stdout == "None" or existing_peering_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Set VPC peering connection ID fact
+  set_fact:
+    cf_db_peering_connection_id: "{{ existing_peering_check.stdout if existing_peering_check.stdout != 'None' and existing_peering_check.stdout != '' else new_peering_result.stdout }}"
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Check VPC peering connection status
+  shell: |
+    aws ec2 describe-vpc-peering-connections \
+      --region {{ cf_db_config.region }} \
+      --vpc-peering-connection-ids {{ cf_db_peering_connection_id }} \
+      --query 'VpcPeeringConnections[0].Status.Code' \
+      --output text
+  register: peering_status_check
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Display VPC peering connection status
+  debug:
+    msg:
+      - "VPC Peering Connection: {{ cf_db_peering_connection_id }}"
+      - "Status: {{ peering_status_check.stdout | default('Unknown') }}"
+      - "Action: {{ 'Will accept' if peering_status_check.stdout == 'pending-acceptance' else 'Already active or no action needed' }}"
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Accept VPC peering connection from us-east-1 side
+  shell: |
+    aws ec2 accept-vpc-peering-connection \
+      --region us-east-1 \
+      --vpc-peering-connection-id {{ cf_db_peering_connection_id }}
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - peering_status_check.stdout is defined
+    - peering_status_check.stdout == "pending-acceptance"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Wait for VPC peering connection to be active
+  shell: |
+    aws ec2 wait vpc-peering-connection-exists \
+      --region {{ cf_db_config.region }} \
+      --vpc-peering-connection-ids {{ cf_db_peering_connection_id }}
+  when: 
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - cf_db_peering_connection_id is defined
+    - cf_db_peering_connection_id != ""
+    - cf_db_peering_connection_id != "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Add route to ROSA VPC via peering connection (Aurora side)
+  shell: |
+    aws ec2 create-route \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ cf_db_private_rt_id }} \
+      --destination-cidr-block {{ rosa_vpc_cidr }} \
+      --vpc-peering-connection-id {{ cf_db_peering_connection_id }}
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Route might already exist
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Add route to Aurora VPC via peering connection (ROSA side)
+  shell: |
+    aws ec2 create-route \
+      --region us-east-1 \
+      --route-table-id {{ rosa_route_table_id }} \
+      --destination-cidr-block {{ cf_db_config.vpc_cidr }} \
+      --vpc-peering-connection-id {{ cf_db_peering_connection_id }}
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Route might already exist
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+# ===== NETWORKING SUMMARY =====
+- name: Display networking configuration summary
+  debug:
+    msg:
+      - "=== CF-DB Networking Complete ==="
+      - "Aurora VPC ID: {{ cf_db_vpc_id }}"
+      - "Aurora VPC CIDR: {{ cf_db_config.vpc_cidr }}"
+      - "Public Subnet: {{ cf_db_public_subnet_id }}"
+      - "Private Subnets: {{ cf_db_private_subnet_ids | join(', ') }}"
+      - "Internet Gateway: {{ cf_db_igw_id }}"
+      - "NAT Gateway: {{ cf_db_nat_gateway_id }}"
+      - "Private Route Table: {{ cf_db_private_rt_id }}"
+      - "{% if cf_db_config.vpc_peering.enabled | default(false) %}VPC Peering: {{ cf_db_peering_connection_id | default('Not created') }} (Cross-Region){% endif %}"
+      - "{% if cf_db_config.vpc_peering.enabled | default(false) %}ROSA VPC (Discovered): {{ rosa_vpc_id | default('Not found') }} ({{ rosa_vpc_cidr | default('N/A') }}){% endif %}"
+      - "{% if cf_db_config.vpc_peering.enabled | default(false) %}ROSA Route Table (Discovered): {{ rosa_route_table_id | default('Not found') }}{% endif %}"
+      - "All resources tagged with Component=cf-db"
+      - "Cross-VPC connectivity: {{ 'Enabled via dynamic discovery' if cf_db_config.vpc_peering.enabled | default(false) else 'Disabled' }}"
+      - "==============================="
+  tags:
+    - cf-db
+    - networking

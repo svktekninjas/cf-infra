@@ -1,0 +1,347 @@
+---
+# NAT Gateway Creation Tasks (AWS CLI)
+# Dependencies: Requires private_subnet_ids from private_subnets.yml
+
+- name: Load environment-specific configuration for NAT Gateway
+  include_vars: "../../environments/{{ target_environment }}/cf-db.yml"
+  tags:
+    - always
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Discover VPC ID if not set for NAT Gateway
+  shell: |
+    aws ec2 describe-vpcs \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=cidr-block,Values={{ cf_db_config.vpc_cidr }}" "Name=state,Values=available" \
+      --query 'Vpcs[0].VpcId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: discovered_vpc_result_nat
+  when: cf_db_config.vpc_id == ""
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Set working VPC ID fact for NAT Gateway
+  set_fact:
+    working_vpc_id_nat: "{{ cf_db_config.vpc_id if cf_db_config.vpc_id != '' else (cf_db_created_vpc_id if cf_db_created_vpc_id is defined else discovered_vpc_result_nat.stdout) }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Check if private subnet IDs are available
+  set_fact:
+    private_subnet_ids: "{{ private_subnet_ids | default([]) }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Get private subnet IDs if not available (dependency check)
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ working_vpc_id_nat }}" "Name=tag:Type,Values=Private" \
+      --query 'Subnets[].SubnetId' \
+      --output text
+  register: existing_private_subnets_result
+  when: private_subnet_ids | length == 0
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Set private subnet IDs from existing subnets
+  set_fact:
+    private_subnet_ids: "{{ existing_private_subnets_result.stdout.split() }}"
+  when: private_subnet_ids | length == 0 and existing_private_subnets_result.stdout is defined
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Validate private subnet dependencies
+  assert:
+    that:
+      - private_subnet_ids is defined
+      - private_subnet_ids | length > 0
+    fail_msg: "NAT Gateway task requires private subnets to be created first. Run with tags: private-subnets,nat-gateway"
+    success_msg: "Private subnet dependencies satisfied."
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Find available unassociated Elastic IP
+  shell: |
+    aws ec2 describe-addresses \
+      --region {{ cf_db_config.region }} \
+      --query 'Addresses[?AssociationId==null].AllocationId' \
+      --output text | head -1
+  register: eip_result
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Create new Elastic IP if none available
+  shell: |
+    aws ec2 allocate-address \
+      --region {{ cf_db_config.region }} \
+      --domain vpc \
+      --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=cf-nat-eip-{{ cf_db_config.common_tags.Environment }}},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=Component,Value={{ cf_db_config.common_tags.Component }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'AllocationId' \
+      --output text
+  register: new_eip_result
+  when: eip_result.stdout == "" or eip_result.stdout == "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Set EIP allocation ID fact
+  set_fact:
+    eip_allocation_id: "{{ eip_result.stdout if eip_result.stdout != '' and eip_result.stdout != 'None' else new_eip_result.stdout }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Discover public subnet ID if not available
+  shell: |
+    aws ec2 describe-subnets \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ working_vpc_id_nat }}" "Name=tag:Type,Values=Public" "Name=state,Values=available" \
+      --query 'Subnets[0].SubnetId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: discovered_public_subnet_result
+  when: cf_db_config.public_subnet_id == ""
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Set working public subnet ID fact
+  set_fact:
+    working_public_subnet_id: "{{ cf_db_config.public_subnet_id if cf_db_config.public_subnet_id != '' else (cf_db_created_public_subnet_id if cf_db_created_public_subnet_id is defined else discovered_public_subnet_result.stdout) }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Tag existing Elastic IP (if reusing)
+  shell: |
+    aws ec2 create-tags \
+      --region {{ cf_db_config.region }} \
+      --resources {{ eip_allocation_id }} \
+      --tags Key=Name,Value=cf-nat-eip-{{ cf_db_config.common_tags.Environment }} Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=Component,Value={{ cf_db_config.common_tags.Component }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}
+  when: eip_result.stdout != "" and eip_result.stdout != "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Create NAT Gateway in public subnet
+  shell: |
+    aws ec2 create-nat-gateway \
+      --region {{ cf_db_config.region }} \
+      --subnet-id {{ working_public_subnet_id }} \
+      --allocation-id {{ eip_allocation_id }} \
+      --query 'NatGateway.NatGatewayId' \
+      --output text
+  register: nat_gateway_result
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Set NAT Gateway ID fact
+  set_fact:
+    nat_gateway_id: "{{ nat_gateway_result.stdout }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Tag NAT Gateway
+  shell: |
+    aws ec2 create-tags \
+      --region {{ cf_db_config.region }} \
+      --resources {{ nat_gateway_id }} \
+      --tags Key=Name,Value=cf-nat-gateway-{{ cf_db_config.common_tags.Environment }} Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=Component,Value={{ cf_db_config.common_tags.Component }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Wait for NAT Gateway to be available
+  shell: |
+    aws ec2 wait nat-gateway-available \
+      --region {{ cf_db_config.region }} \
+      --nat-gateway-ids {{ nat_gateway_id }}
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Check if private route table already exists
+  shell: |
+    aws ec2 describe-route-tables \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ working_vpc_id_nat }}" "Name=tag:Name,Values={{ cf_db_config.route_table.name }}" \
+      --query 'RouteTables[0].RouteTableId' \
+      --output text
+  register: existing_route_table_check
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Create route table for private subnets
+  shell: |
+    aws ec2 create-route-table \
+      --region {{ cf_db_config.region }} \
+      --vpc-id {{ working_vpc_id_nat }} \
+      --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value={{ cf_db_config.route_table.name }}},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=Component,Value={{ cf_db_config.common_tags.Component }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'RouteTable.RouteTableId' \
+      --output text
+  register: private_route_table_result
+  when: existing_route_table_check.stdout == "None" or existing_route_table_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Set private route table ID fact
+  set_fact:
+    private_route_table_id: "{{ existing_route_table_check.stdout if existing_route_table_check.stdout != 'None' and existing_route_table_check.stdout != '' else private_route_table_result.stdout }}"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Check if default route already exists in private route table
+  shell: |
+    aws ec2 describe-route-tables \
+      --region {{ cf_db_config.region }} \
+      --route-table-ids {{ private_route_table_id }} \
+      --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].NatGatewayId' \
+      --output text
+  register: existing_default_route_check
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Add NAT Gateway route to private route table
+  shell: |
+    aws ec2 create-route \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ private_route_table_id }} \
+      --destination-cidr-block 0.0.0.0/0 \
+      --nat-gateway-id {{ nat_gateway_id }}
+  when: existing_default_route_check.stdout == "" or existing_default_route_check.stdout == "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Update existing default route if NAT Gateway changed
+  shell: |
+    aws ec2 replace-route \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ private_route_table_id }} \
+      --destination-cidr-block 0.0.0.0/0 \
+      --nat-gateway-id {{ nat_gateway_id }}
+  when: existing_default_route_check.stdout != "" and existing_default_route_check.stdout != "None" and existing_default_route_check.stdout != nat_gateway_id
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Check existing route table associations for private subnets
+  shell: |
+    aws ec2 describe-route-tables \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=association.subnet-id,Values={{ item }}" \
+      --query 'RouteTables[0].RouteTableId' \
+      --output text
+  register: existing_associations_check
+  loop: "{{ private_subnet_ids }}"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Associate private subnets with private route table
+  shell: |
+    aws ec2 associate-route-table \
+      --region {{ cf_db_config.region }} \
+      --route-table-id {{ private_route_table_id }} \
+      --subnet-id {{ item.item }}
+  loop: "{{ existing_associations_check.results }}"
+  when: item.stdout == "None" or item.stdout == "" or item.stdout != private_route_table_id
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking
+
+- name: Display NAT Gateway configuration
+  debug:
+    msg:
+      - "NAT Gateway created successfully:"
+      - "  - NAT Gateway ID: {{ nat_gateway_id }}"
+      - "  - Elastic IP Allocation: {{ eip_allocation_id }}"
+      - "  - Private Route Table: {{ private_route_table_id }}"
+      - "  - Associated Subnets: {{ private_subnet_ids | join(', ') }}"
+      - "Private subnets now have internet access via NAT Gateway"
+  tags:
+    - cf-db
+    - nat-gateway
+    - networking

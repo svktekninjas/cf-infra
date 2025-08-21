@@ -1,0 +1,174 @@
+---
+# Ansible-lint configuration
+# Production-ready linting rules for Ansible
+
+profile: production
+
+# Paths to exclude from linting
+exclude_paths:
+  - .cache/
+  - .github/
+  - molecule/
+  - tests/
+  - .venv/
+  - venv/
+  - .git/
+  - .tox/
+
+# Enable specific rules
+enable_list:
+  # Built-in module usage
+  - fqcn-builtins  # Use FQCN for built-in modules
+  - no-log-password  # Ensure passwords are not logged
+  - no-same-owner  # Ensure owner is specified
+  
+  # Naming conventions
+  - name[prefix]  # Task names should have prefixes
+  - name[casing]  # Task names should follow casing rules
+  
+  # Best practices
+  - no-handler  # Avoid defining handlers in tasks
+  - no-relative-paths  # Use absolute paths
+  - partial-become  # Ensure become is used properly
+  - key-order  # Ensure consistent key ordering
+  
+  # Security
+  - risky-file-permissions  # Check file permissions
+  - risky-shell-pipe  # Avoid shell pipes
+  - no-free-form  # Avoid free-form tasks
+
+# Skip specific rules
+skip_list:
+  - yaml[line-length]  # Handled by yamllint
+  - name[missing]  # Allow tasks without names in some cases
+  - galaxy[version-incorrect]  # Allow version flexibility
+  - package-latest  # Allow latest packages in dev
+  - experimental  # Skip experimental rules
+  
+# Warn on these rules (don't fail)
+warn_list:
+  - command-instead-of-shell  # Warn about shell usage
+  - command-instead-of-module  # Prefer modules over commands
+  - deprecated-command-syntax  # Warn about deprecated syntax
+  - jinja[spacing]  # Jinja2 spacing issues
+  - no-changed-when  # Tasks should have changed_when
+  - ignore-errors  # Avoid ignore_errors
+
+# Define custom tags for rules
+tags:
+  - formatting
+  - idiom
+  - metadata
+  - security
+
+# Mock modules and collections (if using custom ones)
+mock_modules:
+  - custom_module
+mock_roles:
+  - custom_role
+mock_collections:
+  - custom.collection
+
+# Task naming rules
+task_name_prefix: "^[A-Z].*$"  # Tasks must start with capital letter
+
+# Variable naming pattern
+loop_var_prefix: "^(item|_.+|.+_item)$"
+var_naming_pattern: "^[a-z_][a-z0-9_]*$"
+
+# Set max complexity
+max_block_depth: 6
+
+# Offline mode - don't check external resources
+offline: false
+
+# Rules configuration
+rules:
+  # YAML formatting (delegated to yamllint)
+  yaml: false
+  
+  # Ansible-specific formatting
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    
+  # Variable formatting
+  jinja:
+    when: "{% if %}"
+    variable: "{{ }}"
+    
+  # Role settings
+  role-name:
+    match: "^[a-z][a-z0-9_]+$"
+    
+  # Task settings
+  name:
+    prefix: "^[A-Z].*"
+    casing: "sentence"
+    
+  # Command module usage
+  command-instead-of-module:
+    # Commands that are acceptable
+    allow:
+      - git
+      - systemctl
+      - journalctl
+      
+  # Shell module usage  
+  shell-instead-of-command:
+    # Shell features that require shell module
+    allow:
+      - '|'  # Pipes
+      - '>'  # Redirects
+      - '<'
+      - '&&'  # Command chaining
+      - '||'
+      
+  # File permissions
+  risky-file-permissions:
+    # Default permissions for different file types
+    config: "0644"
+    script: "0755"
+    directory: "0755"
+    
+  # Become usage
+  become:
+    # Tasks that typically need become
+    required_for:
+      - package
+      - service
+      - user
+      - group
+      - file
+      - systemd
+
+# Kinds - define what files contain what type of content
+kinds:
+  - playbook: "**/playbooks/*.{yml,yaml}"
+  - tasks: "**/tasks/*.{yml,yaml}"
+  - handlers: "**/handlers/*.{yml,yaml}"
+  - vars: "**/vars/*.{yml,yaml}"
+  - defaults: "**/defaults/*.{yml,yaml}"
+  - meta: "**/meta/*.{yml,yaml}"
+  - inventory: "**/inventory/*.{yml,yaml}"
+  - requirements: "**/requirements.{yml,yaml}"
+
+# Verbosity
+verbosity: 1
+
+# Use default rules
+use_default_rules: true
+
+# Strict mode
+strict: false
+
+# Write output to file
+write_list:
+  - all
+  - none
+  - rule
+  - tag
+  - task
+
+# Progressive mode - get better over time
+progressive: false

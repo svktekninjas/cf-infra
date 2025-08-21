@@ -1,0 +1,176 @@
+# Update environment files with cluster information
+---
+- name: "Load environment-specific cluster configuration"
+  include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Set full cluster name"
+  set_fact:
+    full_cluster_name: "{{ cluster_name_prefix }}-{{ target_environment }}"
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Get final cluster information for environment update"
+  shell: rosa describe cluster -c {{ full_cluster_name }} --output json
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: cluster_env_info
+  changed_when: false
+  failed_when: false
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Parse cluster information"
+  set_fact:
+    cluster_data: "{{ cluster_env_info.stdout | from_json }}"
+  when: cluster_env_info.rc == 0
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Create cluster environment information"
+  set_fact:
+    cluster_env_vars:
+      ROSA_CLUSTER_NAME: "{{ full_cluster_name }}"
+      ROSA_CLUSTER_STATE: "{{ cluster_data.state | default('unknown') }}"
+      ROSA_CLUSTER_VERSION: "{{ cluster_data.version.raw_id | default('pending') }}"
+      ROSA_CLUSTER_API_URL: "{{ cluster_data.api.url | default('pending') if cluster_data.api is defined else 'pending' }}"
+      ROSA_CLUSTER_CONSOLE_URL: "{{ cluster_data.console.url | default('pending') if cluster_data.console is defined else 'pending' }}"
+      ROSA_CLUSTER_REGION: "{{ aws_region }}"
+      ROSA_CLUSTER_CREATED_DATE: "{{ ansible_date_time.iso8601 }}"
+      ROSA_CLUSTER_ENVIRONMENT: "{{ target_environment }}"
+  when: cluster_data is defined
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Update environment-specific .env file"
+  lineinfile:
+    path: "{{ ansible_env_path }}/.env"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    create: yes
+    backup: yes
+  loop: "{{ cluster_env_vars | dict2items }}"
+  when: cluster_env_vars is defined
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Create cluster info summary file"
+  copy:
+    content: |
+      # ROSA Cluster Information - {{ target_environment }} Environment
+      Generated on: {{ ansible_date_time.iso8601 }}
+      
+      ## Cluster Details
+      - Name: {{ full_cluster_name }}
+      - State: {{ cluster_data.state | default('unknown') if cluster_data is defined else 'unknown' }}
+      - Version: {{ cluster_data.version.raw_id | default('pending') if cluster_data is defined else 'pending' }}
+      - Region: {{ aws_region }}
+      - Environment: {{ target_environment }}
+      
+      ## Access URLs
+      - API URL: {{ cluster_data.api.url | default('pending') if (cluster_data is defined and cluster_data.api is defined) else 'pending' }}
+      - Console URL: {{ cluster_data.console.url | default('pending') if (cluster_data is defined and cluster_data.console is defined) else 'pending' }}
+      
+      ## Authentication
+      {% if admin_username is defined %}
+      - Admin Username: {{ admin_username }}
+      - Admin Password: {{ admin_password }}
+      {% endif %}
+      {% if dedicated_admin_user is defined %}
+      - Dedicated Admin User: {{ dedicated_admin_user }}
+      {% endif %}
+      {% if identity_provider is defined and identity_provider.enabled | default(false) %}
+      - Identity Provider: {{ identity_provider.type }} ({{ identity_provider.name }})
+      {% endif %}
+      
+      ## Configuration
+      - Compute Nodes: {{ compute_nodes }}
+      - Machine Type: {{ compute_machine_type }}
+      - Multi-AZ: {{ multi_az | default(false) }}
+      - Autoscaling: {{ enable_autoscaling | default(false) }}
+      {% if enable_autoscaling | default(false) %}
+      - Min Replicas: {{ min_replicas | default(2) }}
+      - Max Replicas: {{ max_replicas | default(6) }}
+      {% endif %}
+      - Private Cluster: {{ private_cluster | default(false) }}
+      - PrivateLink: {{ privatelink_enabled | default(false) }}
+      - FIPS: {{ enable_fips | default(false) }}
+      - ETCD Encryption: {{ enable_etcd_encryption | default(false) }}
+      
+      ## Network Configuration
+      - Machine CIDR: {{ machine_cidr }}
+      - Service CIDR: {{ service_cidr }}
+      - Pod CIDR: {{ pod_cidr }}
+      - Host Prefix: {{ host_prefix }}
+      
+      ## OIDC Configuration
+      - OIDC Config ID: {{ oidc_config_id }}
+      
+      ---
+      This file was generated automatically by the ROSA Ansible cluster role.
+    dest: "{{ ansible_env_path }}/cluster-info-{{ target_environment }}.md"
+    backup: yes
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Update global cluster inventory file"
+  lineinfile:
+    path: "{{ playbook_dir }}/cluster-inventory.txt"
+    regexp: "^{{ target_environment }}:"
+    line: "{{ target_environment }}: {{ full_cluster_name }} ({{ cluster_data.state | default('unknown') if cluster_data is defined else 'unknown' }}) - {{ cluster_data.console.url | default('pending') if (cluster_data is defined and cluster_data.console is defined) else 'pending' }}"
+    create: yes
+    backup: yes
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Create kubectl configuration hint"
+  copy:
+    content: |
+      #!/bin/bash
+      # ROSA Cluster kubectl configuration for {{ target_environment }}
+      # Generated on: {{ ansible_date_time.iso8601 }}
+      
+      echo "🔗 Connecting to ROSA cluster: {{ full_cluster_name }}"
+      echo "📍 Environment: {{ target_environment }}"
+      echo "🌐 Region: {{ aws_region }}"
+      echo ""
+      
+      # Get the login command
+      echo "Getting cluster login command..."
+      rosa describe cluster -c {{ full_cluster_name }} | grep "oc login"
+      
+      echo ""
+      echo "💡 To configure kubectl access:"
+      echo "1. Run the 'oc login' command shown above"
+      echo "2. Or use: rosa login --cluster {{ full_cluster_name }}"
+      echo ""
+      echo "🎯 Console URL: {{ cluster_data.console.url | default('pending - cluster still installing') if (cluster_data is defined and cluster_data.console is defined) else 'pending - cluster still installing' }}"
+      echo "🔧 API URL: {{ cluster_data.api.url | default('pending - cluster still installing') if (cluster_data is defined and cluster_data.api is defined) else 'pending - cluster still installing' }}"
+    dest: "{{ ansible_env_path }}/connect-{{ target_environment }}.sh"
+    mode: '0755'
+  tags:
+    - cluster
+    - cluster-env
+
+- name: "Display environment update summary"
+  debug:
+    msg:
+      - "📝 Environment files updated:"
+      - "  - Environment variables: {{ ansible_env_path }}/.env"
+      - "  - Cluster info: {{ ansible_env_path }}/cluster-info-{{ target_environment }}.md"
+      - "  - Connection script: {{ ansible_env_path }}/connect-{{ target_environment }}.sh"
+      - "  - Global inventory: {{ playbook_dir }}/cluster-inventory.txt"
+      - ""
+      - "✅ Cluster environment configuration completed!"
+  tags:
+    - cluster
+    - cluster-env

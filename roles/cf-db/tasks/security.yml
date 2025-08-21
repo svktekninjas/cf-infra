@@ -1,0 +1,167 @@
+---
+# Consolidated CF-DB Security Groups with Tag-Based Idempotency
+# Creates security groups with cross-VPC access rules
+# All resources tagged with 'Component=cf-db' for proper idempotency
+
+- name: Load environment-specific configuration
+  include_vars: "../../environments/{{ target_environment }}/cf-db.yml"
+  tags:
+    - always
+    - cf-db
+    - security
+
+# Dependency: VPC ID must be available from networking task
+- name: Validate VPC dependency
+  assert:
+    that:
+      - cf_db_vpc_id is defined
+      - cf_db_vpc_id != ""
+      - cf_db_vpc_id != "None"
+    fail_msg: "VPC ID is required. Run networking task first."
+    success_msg: "VPC dependency satisfied: {{ cf_db_vpc_id }}"
+  tags:
+    - cf-db
+    - security
+
+# ===== AURORA DATABASE SECURITY GROUP =====
+- name: Check if Aurora DB security group exists (tag-based)
+  shell: |
+    aws ec2 describe-security-groups \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=vpc-id,Values={{ cf_db_vpc_id }}" "Name=tag:Component,Values=cf-db" "Name=tag:Purpose,Values=Aurora" "Name=tag:Environment,Values={{ cf_db_config.common_tags.Environment }}" \
+      --query 'SecurityGroups[0].GroupId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_aurora_sg_check
+  failed_when: false
+  tags:
+    - cf-db
+    - security
+
+- name: Create Aurora DB security group
+  shell: |
+    aws ec2 create-security-group \
+      --region {{ cf_db_config.region }} \
+      --group-name "{{ cf_db_config.security_group.name }}" \
+      --description "{{ cf_db_config.security_group.description }}" \
+      --vpc-id {{ cf_db_vpc_id }} \
+      --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value={{ cf_db_config.security_group.name }}},{Key=Component,Value=cf-db},{Key=Purpose,Value=Aurora},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
+      --query 'GroupId' \
+      --output text
+  register: new_aurora_sg_result
+  when: existing_aurora_sg_check.stdout == "None" or existing_aurora_sg_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - security
+
+- name: Set Aurora security group ID fact
+  set_fact:
+    cf_db_aurora_sg_id: "{{ existing_aurora_sg_check.stdout if existing_aurora_sg_check.stdout != 'None' and existing_aurora_sg_check.stdout != '' else new_aurora_sg_result.stdout }}"
+  tags:
+    - cf-db
+    - security
+
+# ===== SECURITY GROUP RULES MANAGEMENT =====
+- name: Check existing ingress rules for Aurora security group
+  shell: |
+    aws ec2 describe-security-groups \
+      --region {{ cf_db_config.region }} \
+      --group-ids {{ cf_db_aurora_sg_id }} \
+      --query 'SecurityGroups[0].IpPermissions[?FromPort==`{{ cf_db_config.security_group.db_port }}`].IpRanges[].CidrIp' \
+      --output text
+  register: existing_aurora_cidr_rules
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false
+  tags:
+    - cf-db
+    - security
+
+- name: Add CIDR-based ingress rules to Aurora security group
+  shell: |
+    aws ec2 authorize-security-group-ingress \
+      --region {{ cf_db_config.region }} \
+      --group-id {{ cf_db_aurora_sg_id }} \
+      --protocol tcp \
+      --port {{ cf_db_config.security_group.db_port }} \
+      --cidr {{ item }}
+  loop: "{{ cf_db_config.security_group.allowed_cidrs }}"
+  when: 
+    - existing_aurora_cidr_rules.stdout is defined
+    - item not in existing_aurora_cidr_rules.stdout
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Rule might already exist
+  tags:
+    - cf-db
+    - security
+
+- name: Add OpenShift security group ingress rule (if configured)
+  shell: |
+    aws ec2 authorize-security-group-ingress \
+      --region {{ cf_db_config.region }} \
+      --group-id {{ cf_db_aurora_sg_id }} \
+      --protocol tcp \
+      --port {{ cf_db_config.security_group.db_port }} \
+      --source-group {{ cf_db_config.openshift_sg_id }}
+  when: 
+    - cf_db_config.openshift_sg_id is defined 
+    - cf_db_config.openshift_sg_id != ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  failed_when: false  # Rule might already exist
+  tags:
+    - cf-db
+    - security
+
+# ===== DB SUBNET GROUP MANAGEMENT =====
+- name: Check if DB subnet group exists (tag-based)
+  shell: |
+    aws rds describe-db-subnet-groups \
+      --region {{ cf_db_config.region }} \
+      --db-subnet-group-name {{ cf_db_config.db_subnet_group.name }} \
+      --query 'DBSubnetGroups[0].DBSubnetGroupName' \
+      --output text 2>/dev/null || echo "None"
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_subnet_group_check
+  failed_when: false
+  tags:
+    - cf-db
+    - security
+
+- name: Create DB subnet group for Aurora
+  shell: |
+    aws rds create-db-subnet-group \
+      --region {{ cf_db_config.region }} \
+      --db-subnet-group-name {{ cf_db_config.db_subnet_group.name }} \
+      --db-subnet-group-description "{{ cf_db_config.db_subnet_group.description }}" \
+      --subnet-ids {{ cf_db_private_subnet_ids | join(' ') }} \
+      --tags Key=Name,Value={{ cf_db_config.db_subnet_group.name }} Key=Component,Value=cf-db Key=Environment,Value={{ cf_db_config.common_tags.Environment }} Key=Project,Value={{ cf_db_config.common_tags.Project }} Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}
+  when: existing_subnet_group_check.stdout == "None" or existing_subnet_group_check.stdout == ""
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  tags:
+    - cf-db
+    - security
+
+# ===== SECURITY SUMMARY =====
+- name: Display security configuration summary
+  debug:
+    msg:
+      - "=== CF-DB Security Complete ==="
+      - "Aurora Security Group: {{ cf_db_aurora_sg_id }}"
+      - "DB Port: {{ cf_db_config.security_group.db_port }}"
+      - "Allowed CIDRs: {{ cf_db_config.security_group.allowed_cidrs | join(', ') }}"
+      - "OpenShift SG: {{ cf_db_config.openshift_sg_id | default('Not configured') }}"
+      - "DB Subnet Group: {{ cf_db_config.db_subnet_group.name }}"
+      - "Private Subnets: {{ cf_db_private_subnet_ids | join(', ') }}"
+      - "Cross-VPC Access: Enabled via security group rules"
+      - "All resources tagged with Component=cf-db"
+      - "==============================="
+  tags:
+    - cf-db
+    - security
