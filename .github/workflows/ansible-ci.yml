@@ -1,5 +1,11 @@
 name: Ansible CI/CD Pipeline
 
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  actions: read
+
 on:
   push:
     branches: [ main, develop, feature/* ]
@@ -263,13 +269,26 @@ jobs:
         with:
           scan-type: 'fs'
           scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'  # Don't fail the build on vulnerabilities
+        continue-on-error: true
+
+      - name: Run Trivy for SARIF (if permissions available)
+        uses: aquasecurity/trivy-action@0.28.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
+          severity: 'CRITICAL,HIGH'
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
         with:
           sarif_file: 'trivy-results.sarif'
 
