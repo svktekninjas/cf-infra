@@ -203,7 +203,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Ansible
+      - name: Install Ansible and dependencies
         run: |
           pip install --upgrade pip
           pip install ansible==${{ env.ANSIBLE_VERSION }}
@@ -211,12 +211,20 @@ jobs:
           pip install openshift   # For OpenShift modules
           pip install boto3       # For AWS modules
           pip install requests    # For URI module
+          ansible-galaxy collection install kubernetes.core -p ./collections
+          ansible-galaxy collection install amazon.aws -p ./collections
+          ansible-galaxy collection install community.general -p ./collections
 
       - name: Check playbook syntax
         run: |
           for playbook in playbooks/*.yml; do
-            echo "Checking syntax for: $playbook"
-            ansible-playbook --syntax-check "$playbook" -e env=${{ matrix.environment }} || exit 1
+            if [ -f "$playbook" ]; then
+              echo "Checking syntax for: $playbook"
+              ansible-playbook --syntax-check "$playbook" \
+                -e target_environment=${{ matrix.environment }} \
+                -e aws_profile=test-profile \
+                -e env=${{ matrix.environment }} || exit 1
+            fi
           done
 
       - name: Check role syntax
@@ -224,13 +232,20 @@ jobs:
           for role in roles/*/; do
             if [ -f "${role}tasks/main.yml" ]; then
               echo "Checking role: $role"
-              ansible-playbook --syntax-check <(echo "
-              ---
-              - hosts: localhost
-                gather_facts: no
-                roles:
-                  - $(basename $role)
-              ") -e env=${{ matrix.environment }} || exit 1
+              role_name=$(basename $role)
+              cat > /tmp/test-playbook.yml << EOF
+          ---
+          - hosts: localhost
+            gather_facts: no
+            vars:
+              target_environment: ${{ matrix.environment }}
+              aws_profile: test-profile
+            roles:
+              - ${role_name}
+          EOF
+              ansible-playbook --syntax-check /tmp/test-playbook.yml \
+                -e target_environment=${{ matrix.environment }} \
+                -e aws_profile=test-profile || exit 1
             fi
           done
 
