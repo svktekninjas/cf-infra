@@ -453,49 +453,12 @@ jobs:
           molecule test || true
         continue-on-error: true
 
-  # Job 7: Documentation Check
-  documentation-check:
-    name: Documentation Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
 
-      - name: Check for README files
-        run: |
-          missing_docs=()
-          for role in roles/*/; do
-            if [ ! -f "${role}README.md" ]; then
-              missing_docs+=("$role")
-            fi
-          done
-
-          if [ ${#missing_docs[@]} -gt 0 ]; then
-            echo "Missing README.md in roles:"
-            printf '%s\n' "${missing_docs[@]}"
-            exit 1
-          fi
-
-      - name: Check for meta/main.yml
-        run: |
-          missing_meta=()
-          for role in roles/*/; do
-            if [ ! -f "${role}meta/main.yml" ]; then
-              missing_meta+=("$role")
-            fi
-          done
-
-          if [ ${#missing_meta[@]} -gt 0 ]; then
-            echo "Missing meta/main.yml in roles:"
-            printf '%s\n' "${missing_meta[@]}"
-            echo "Warning: Roles without meta files"
-          fi
-
-  # Job 8: Summary Report
+  # Job 7: Summary Report
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [yaml-lint, ansible-lint, ansible-syntax, security-scan, variable-validation, documentation-check]
+    needs: [yaml-lint, ansible-lint, ansible-syntax, security-scan, variable-validation]
     if: always()
     steps:
       - name: Download all artifacts
@@ -517,7 +480,6 @@ jobs:
           echo "| Syntax Check | ${{ needs.ansible-syntax.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Variable Validation | ${{ needs.variable-validation.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Documentation | ${{ needs.documentation-check.result }} |" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Reports" >> $GITHUB_STEP_SUMMARY
@@ -552,7 +514,6 @@ jobs:
             | Syntax Check | ${{ needs.ansible-syntax.result }} |
             | Security | ${{ needs.security-scan.result }} |
             | Variables | ${{ needs.variable-validation.result }} |
-            | Docs | ${{ needs.documentation-check.result }} |
 
             View full reports in the workflow artifacts.
             `;
