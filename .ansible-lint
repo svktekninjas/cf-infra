@@ -61,13 +61,11 @@ tags:
   - metadata
   - security
 
-# Mock modules and collections (if using custom ones)
+# Mock modules and roles (if using custom ones)
 mock_modules:
   - custom_module
 mock_roles:
   - custom_role
-mock_collections:
-  - custom.collection
 
 # Task naming rules
 task_name_prefix: "^[A-Z].*$"  # Tasks must start with capital letter
@@ -82,65 +80,9 @@ max_block_depth: 6
 # Offline mode - don't check external resources
 offline: false
 
-# Rules configuration
-rules:
-  # YAML formatting (delegated to yamllint)
-  yaml: false
-  
-  # Ansible-specific formatting
-  braces:
-    min-spaces-inside: 0
-    max-spaces-inside: 1
-    
-  # Variable formatting
-  jinja:
-    when: "{% if %}"
-    variable: "{{ }}"
-    
-  # Role settings
-  role-name:
-    match: "^[a-z][a-z0-9_]+$"
-    
-  # Task settings
-  name:
-    prefix: "^[A-Z].*"
-    casing: "sentence"
-    
-  # Command module usage
-  command-instead-of-module:
-    # Commands that are acceptable
-    allow:
-      - git
-      - systemctl
-      - journalctl
-      
-  # Shell module usage  
-  shell-instead-of-command:
-    # Shell features that require shell module
-    allow:
-      - '|'  # Pipes
-      - '>'  # Redirects
-      - '<'
-      - '&&'  # Command chaining
-      - '||'
-      
-  # File permissions
-  risky-file-permissions:
-    # Default permissions for different file types
-    config: "0644"
-    script: "0755"
-    directory: "0755"
-    
-  # Become usage
-  become:
-    # Tasks that typically need become
-    required_for:
-      - package
-      - service
-      - user
-      - group
-      - file
-      - systemd
+# Note: In ansible-lint 25.x, the 'rules' section only accepts rule configurations
+# Most custom rule configurations from older versions are no longer supported
+# Rules are now configured through enable_list, skip_list, and warn_list above
 
 # Kinds - define what files contain what type of content
 kinds:
@@ -162,13 +104,7 @@ use_default_rules: true
 # Strict mode
 strict: false
 
-# Write output to file
-write_list:
-  - all
-  - none
-  - rule
-  - tag
-  - task
+# Write output - removed as this is for --fix option, not config file
 
 # Progressive mode - get better over time
 progressive: false

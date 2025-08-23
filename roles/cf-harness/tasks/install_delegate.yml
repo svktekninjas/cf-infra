@@ -16,7 +16,7 @@
     name: "{{ harness_delegate_name }}"
     namespace: "{{ harness_delegate_namespace }}"
     state: absent
-  when: 
+  when:
     - remove_existing_delegate | bool
     - existing_delegate.resources | length > 0
 
@@ -92,76 +92,76 @@
           spec:
             serviceAccountName: "{{ harness_delegate_sa_name }}"
             containers:
-            - name: delegate
-              image: "{{ harness_delegate_image }}"
-              imagePullPolicy: "{{ harness_delegate_image_pull_policy }}"
-              env:
-              - name: DELEGATE_NAME
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: DELEGATE_NAME
-              - name: ACCOUNT_ID
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: ACCOUNT_ID
-              - name: DELEGATE_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: "{{ harness_delegate_name }}-secret"
-                    key: DELEGATE_TOKEN
-              - name: MANAGER_HOST_AND_PORT
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: MANAGER_HOST_AND_PORT
-              - name: LOG_STREAMING_SERVICE_URL
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: LOG_STREAMING_SERVICE_URL
-              - name: DELEGATE_TAGS
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: DELEGATE_TAGS
-              - name: DELEGATE_DESCRIPTION
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: DELEGATE_DESCRIPTION
-              - name: DELEGATE_TYPE
-                value: "KUBERNETES"
-              - name: INIT_SCRIPT
-                valueFrom:
-                  configMapKeyRef:
-                    name: "{{ harness_delegate_name }}-config"
-                    key: INIT_SCRIPT
-              - name: DELEGATE_NAMESPACE
-                valueFrom:
-                  fieldRef:
-                    fieldPath: metadata.namespace
-              - name: JAVA_OPTS
-                value: "-Xms512m -Xmx1024m"
-              resources:
-                requests:
-                  cpu: "{{ harness_delegate_cpu_request }}"
-                  memory: "{{ harness_delegate_memory_request }}"
-                limits:
-                  cpu: "{{ harness_delegate_cpu_limit }}"
-                  memory: "{{ harness_delegate_memory_limit }}"
-              livenessProbe:
-                httpGet:
-                  path: /health
-                  port: 3000
-                initialDelaySeconds: 120
-                periodSeconds: 60
-                timeoutSeconds: 10
-              readinessProbe:
-                httpGet:
-                  path: /health
-                  port: 3000
+              - name: delegate
+                image: "{{ harness_delegate_image }}"
+                imagePullPolicy: "{{ harness_delegate_image_pull_policy }}"
+                env:
+                  - name: DELEGATE_NAME
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: DELEGATE_NAME
+                  - name: ACCOUNT_ID
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: ACCOUNT_ID
+                  - name: DELEGATE_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ harness_delegate_name }}-secret"
+                        key: DELEGATE_TOKEN
+                  - name: MANAGER_HOST_AND_PORT
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: MANAGER_HOST_AND_PORT
+                  - name: LOG_STREAMING_SERVICE_URL
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: LOG_STREAMING_SERVICE_URL
+                  - name: DELEGATE_TAGS
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: DELEGATE_TAGS
+                  - name: DELEGATE_DESCRIPTION
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: DELEGATE_DESCRIPTION
+                  - name: DELEGATE_TYPE
+                    value: "KUBERNETES"
+                  - name: INIT_SCRIPT
+                    valueFrom:
+                      configMapKeyRef:
+                        name: "{{ harness_delegate_name }}-config"
+                        key: INIT_SCRIPT
+                  - name: DELEGATE_NAMESPACE
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.namespace
+                  - name: JAVA_OPTS
+                    value: "-Xms512m -Xmx1024m"
+                resources:
+                  requests:
+                    cpu: "{{ harness_delegate_cpu_request }}"
+                    memory: "{{ harness_delegate_memory_request }}"
+                  limits:
+                    cpu: "{{ harness_delegate_cpu_limit }}"
+                    memory: "{{ harness_delegate_memory_limit }}"
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: 3000
+                  initialDelaySeconds: 120
+                  periodSeconds: 60
+                  timeoutSeconds: 10
+                readinessProbe:
+                  httpGet:
+                    path: /health
+                    port: 3000
                 initialDelaySeconds: 60
                 periodSeconds: 30
                 timeoutSeconds: 10
@@ -183,9 +183,9 @@
           app: harness-delegate
           harness.io/name: "{{ harness_delegate_name }}"
         ports:
-        - name: metrics
-          port: 3000
-          targetPort: 3000
+          - name: metrics
+            port: 3000
+            targetPort: 3000
     state: present
 
 - name: Create NetworkPolicy for delegate
@@ -203,30 +203,30 @@
           matchLabels:
             app: harness-delegate
         policyTypes:
-        - Ingress
-        - Egress
+          - Ingress
+          - Egress
         ingress:
-        - from:
-          - namespaceSelector:
-              matchLabels:
-                name: "{{ item }}"
-          ports:
-          - protocol: TCP
-            port: 3000
+          - from:
+              - namespaceSelector:
+                  matchLabels:
+                    name: "{{ item }}"
+            ports:
+              - protocol: TCP
+                port: 3000
         egress:
-        - to:
-          - namespaceSelector: {}
-          ports:
-          - protocol: TCP
-            port: 443
-          - protocol: TCP
-            port: 80
-          - protocol: TCP
-            port: 6443  # Kubernetes API
-        - to:
-          - podSelector:
-              matchLabels:
-                app: harness-delegate
+          - to:
+              - namespaceSelector: {}
+            ports:
+              - protocol: TCP
+                port: 443
+              - protocol: TCP
+                port: 80
+              - protocol: TCP
+                port: 6443  # Kubernetes API
+          - to:
+              - podSelector:
+                  matchLabels:
+                    app: harness-delegate
     state: present
   loop: "{{ allowed_namespaces }}"
   when: enable_network_policies | bool
@@ -238,7 +238,7 @@
     name: "{{ harness_delegate_name }}"
     namespace: "{{ harness_delegate_namespace }}"
   register: delegate_deployment
-  until: 
+  until:
     - delegate_deployment.resources[0].status.conditions is defined
     - delegate_deployment.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | list | length > 0
     - (delegate_deployment.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | first).status == "True"
@@ -268,7 +268,7 @@
       - Namespace: {{ harness_delegate_namespace }}
       - Status: {{ delegate_deployment.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | first }}
       - Replicas: {{ delegate_deployment.resources[0].status.readyReplicas }}/{{ delegate_deployment.resources[0].status.replicas }}
-      
+
       To verify delegate registration:
       1. Check Harness UI: Setup -> Delegates
       2. Run: harness delegate list

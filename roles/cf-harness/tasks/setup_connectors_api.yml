@@ -233,24 +233,24 @@
       ========================================
       Connectors Setup Complete via API:
       ========================================
-      
+
       GitHub Connector:
       - ID: {{ connector_github_id }}
       - Status: {{ 'Connected' if github_test.status == 200 else 'Connection Failed' }}
       - Test Result: {{ github_test.json.data.status | default('N/A') if github_test.status == 200 else github_test.msg | default('Failed') }}
-      
+
       AWS ECR Connector:
       - ID: {{ connector_aws_ecr_id }}
       - Status: {{ 'Connected' if ecr_test.status == 200 else 'Connection Failed' }}
       - Registry: {{ ecr_registry }}
       - Test Result: {{ ecr_test.json.data.status | default('N/A') if ecr_test.status == 200 else ecr_test.msg | default('Failed') }}
-      
+
       ROSA Cluster Connector:
       - ID: {{ connector_rosa_cluster_id }}
       - Status: {{ 'Connected' if rosa_test.status == 200 else 'Connection Failed' }}
       - Endpoint: {{ rosa_api_endpoint.stdout }}
       - Test Result: {{ rosa_test.json.data.status | default('N/A') if rosa_test.status == 200 else rosa_test.msg | default('Failed') }}
-      
+
       Total Connectors in Project: {{ connector_list.json.data.totalItems | default(0) }}
 
 - name: Clean up temp directory

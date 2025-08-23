@@ -118,7 +118,7 @@
       identifier: "{{ item }}"
       name: "{{ item | upper }}"
       description: "{{ item | upper }} environment for CF deployment"
-      type: "PreProduction" 
+      type: "PreProduction"
       accountIdentifier: "{{ harness_account_id }}"
       orgIdentifier: "{{ harness_org_id }}"
       projectIdentifier: "{{ harness_project_id }}"
@@ -330,24 +330,24 @@
       ========================================
       Harness Resources Created via API:
       ========================================
-      
+
       Services (Total: {{ services_list.json.data.totalItems | default(0) }}):
       {% for service in services_list.json.data.content | default([]) %}
       - {{ service.service.name }} ({{ service.service.identifier }})
       {% endfor %}
-      
+
       Environments (Total: {{ environments_list_output.json.data.totalItems | default(0) }}):
       {% for env in environments_list_output.json.data.content | default([]) %}
       - {{ env.environment.name }} ({{ env.environment.identifier }})
       {% endfor %}
-      
+
       {% if enable_pipeline_creation %}
       Pipelines (Total: {{ pipelines_list.json.data.totalItems | default(0) }}):
       {% for pipeline in pipelines_list.json.data.content | default([]) %}
       - {{ pipeline.name }} ({{ pipeline.identifier }})
       {% endfor %}
       {% endif %}
-      
+
       Next Steps:
       1. Log into Harness UI: {{ harness_platform_url }}
       2. Navigate to your project: {{ harness_project_id }}

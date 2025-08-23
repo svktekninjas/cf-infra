@@ -34,7 +34,7 @@
       x-api-key: "{{ harness_api_key }}"
     status_code: [200, 404]
   register: delegate_status
-  when: 
+  when:
     - delegate_namespace_check.resources | length > 0
     - delegate_deployment_check.resources | length > 0
   ignore_errors: yes
@@ -57,7 +57,7 @@
 - name: Harness Delegate - Prompt for delegate token if not provided
   pause:
     prompt: |
-      
+
       Harness Delegate Token Required!
       ================================
       Please provide the delegate token from Harness UI:
@@ -65,7 +65,7 @@
       2. Navigate to Project Settings > Delegates
       3. Click "New Delegate" > "Kubernetes"
       4. Copy the delegate token
-      
+
       Enter delegate token
   register: delegate_token_input
   when:
@@ -123,9 +123,9 @@
         kind: ClusterRole
         name: cluster-admin
       subjects:
-      - kind: ServiceAccount
-        name: "{{ harness_delegate_sa_name }}"
-        namespace: "{{ harness_delegate_namespace }}"
+        - kind: ServiceAccount
+          name: "{{ harness_delegate_sa_name }}"
+          namespace: "{{ harness_delegate_namespace }}"
     state: present
   tags:
     - cf-deployment
@@ -149,11 +149,11 @@
           echo "Manager Endpoint: {{ harness_manager_endpoint }}"
           echo "WARNING: Using fallback image. This is not a real delegate."
           echo "To deploy real delegate, fix cluster network connectivity or registry."
-          
+
           # Create a fake delegate log for readiness probe
           mkdir -p /opt/harness-delegate
           touch /opt/harness-delegate/delegate.log
-          
+
           # Simple heartbeat loop
           while true; do
             echo "$(date): Delegate heartbeat (simulated)"
@@ -206,64 +206,70 @@
           spec:
             serviceAccountName: "{{ harness_delegate_sa_name }}"
             containers:
-            - name: delegate
-              image: "{{ harness_delegate_image }}"
-              imagePullPolicy: IfNotPresent
-              command: "{{ ['/bin/sh', '/scripts/delegate.sh'] if harness_delegate_use_fallback_image else omit }}"
-              volumeMounts: "{{ [{'name': 'script', 'mountPath': '/scripts'}] if harness_delegate_use_fallback_image else omit }}"
-              env:
-              - name: ACCOUNT_ID
-                value: "{{ harness_account_id }}"
-              - name: DELEGATE_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: "{{ harness_delegate_name }}-token"
-                    key: DELEGATE_TOKEN
-              - name: MANAGER_HOST_AND_PORT
-                value: "{{ harness_manager_endpoint }}"
-              - name: DELEGATE_NAME
-                value: "{{ harness_delegate_name }}"
-              - name: DELEGATE_TYPE
-                value: "KUBERNETES"
-              - name: NEXT_GEN
-                value: "true"
-              - name: DELEGATE_TAGS
-                value: "{{ harness_delegate_tags }}"
-              - name: ORG_IDENTIFIER
-                value: "{{ harness_org_id }}"
-              - name: PROJECT_IDENTIFIER
-                value: "{{ harness_project_id }}"
-              - name: LOG_STREAMING_SERVICE_URL
-                value: "{{ harness_log_streaming_endpoint }}"
-              - name: DELEGATE_DESCRIPTION
-                value: "{{ harness_delegate_description }}"
-              - name: POLL_FOR_TASKS
-                value: "false"
-              resources:
-                limits:
-                  memory: "{{ harness_delegate_memory_limit }}"
-                  cpu: "{{ harness_delegate_cpu_limit }}"
-                requests:
-                  memory: "{{ harness_delegate_memory_request }}"
-                  cpu: "{{ harness_delegate_cpu_request }}"
-              readinessProbe:
-                exec:
-                  command:
-                  - test
-                  - -s
-                  - /opt/harness-delegate/delegate.log
+              - name: delegate
+                image: "{{ harness_delegate_image }}"
+                imagePullPolicy: IfNotPresent
+                command: "{{ ['/bin/sh', '/scripts/delegate.sh'] if harness_delegate_use_fallback_image else omit }}"
+                volumeMounts: "{{ [{'name': 'script', 'mountPath': '/scripts'}] if harness_delegate_use_fallback_image else omit }}"
+                env:
+                  - name: ACCOUNT_ID
+                    value: "{{ harness_account_id }}"
+                  - name: DELEGATE_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: "{{ harness_delegate_name }}-token"
+                        key: DELEGATE_TOKEN
+                  - name: MANAGER_HOST_AND_PORT
+                    value: "{{ harness_manager_endpoint }}"
+                  - name: DELEGATE_NAME
+                    value: "{{ harness_delegate_name }}"
+                  - name: DELEGATE_TYPE
+                    value: "KUBERNETES"
+                  - name: NEXT_GEN
+                    value: "true"
+                  - name: DELEGATE_TAGS
+                    value: "{{ harness_delegate_tags }}"
+                  - name: ORG_IDENTIFIER
+                    value: "{{ harness_org_id }}"
+                  - name: PROJECT_IDENTIFIER
+                    value: "{{ harness_project_id }}"
+                  - name: LOG_STREAMING_SERVICE_URL
+                    value: "{{ harness_log_streaming_endpoint }}"
+                  - name: DELEGATE_DESCRIPTION
+                    value: "{{ harness_delegate_description }}"
+                  - name: POLL_FOR_TASKS
+                    value: "false"
+                resources:
+                  limits:
+                    memory: "{{ harness_delegate_memory_limit }}"
+                    cpu: "{{ harness_delegate_cpu_limit }}"
+                  requests:
+                    memory: "{{ harness_delegate_memory_request }}"
+                    cpu: "{{ harness_delegate_cpu_request }}"
+                readinessProbe:
+                  exec:
+                    command:
+                      - test
+                      - -s
+                      - /opt/harness-delegate/delegate.log
                 initialDelaySeconds: 20
                 periodSeconds: 10
-              livenessProbe:
-                exec:
-                  command:
-                  - bash
-                  - -c
-                  - '[[ -e /opt/harness-delegate/msg/data/watcher-data && $(($(date +%s000) - $(grep heartbeat /opt/harness-delegate/msg/data/watcher-data | cut -d ":" -f 2 | cut -d "," -f 1))) -lt 300000 ]]'
-                initialDelaySeconds: 240
-                periodSeconds: 10
-                failureThreshold: 3
-            volumes: "{{ [{'name': 'script', 'configMap': {'name': harness_delegate_name + '-script', 'defaultMode': 493}}] if harness_delegate_use_fallback_image else omit }}"
+                livenessProbe:
+                  exec:
+                    command:
+                      - bash
+                      - -c
+                      - >-
+                        [[ -e /opt/harness-delegate/msg/data/watcher-data &&
+                        $(($(date +%s000) - $(grep heartbeat /opt/harness-delegate/msg/data/watcher-data |
+                        cut -d ":" -f 2 | cut -d "," -f 1))) -lt 300000 ]]
+                  initialDelaySeconds: 240
+                  periodSeconds: 10
+                  failureThreshold: 3
+            volumes: >-
+              {{ [{'name': 'script', 'configMap':
+              {'name': harness_delegate_name + '-script', 'defaultMode': 493}}]
+              if harness_delegate_use_fallback_image else omit }}
     state: present
   when: harness_delegate_token is defined and harness_delegate_token != ""
   tags:

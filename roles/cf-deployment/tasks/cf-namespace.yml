@@ -55,7 +55,7 @@
 
 - name: Display CF namespace status
   debug:
-    msg: 
+    msg:
       - "Namespace: {{ cf_namespace }}"
       - "Environment: {{ target_environment | default('dev') }}"
       - "Status: {{ cf_namespace_info.resources[0].status.phase if cf_namespace_info.resources else 'Not Found' }}"

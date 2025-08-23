@@ -69,7 +69,7 @@
       ========================================
       Delegate Status:
       ========================================
-      
+
       Delegate API Status:
       {% if delegate_list.status == 200 %}
       Total Delegates: {{ delegate_list.json.data.totalItems | default(0) }}
@@ -82,7 +82,7 @@
       {% else %}
       Unable to fetch delegate status from API
       {% endif %}
-      
+
       Kubernetes Deployment:
       - Name: {{ harness_delegate_name }}
       - Namespace: {{ harness_delegate_namespace }}
@@ -116,7 +116,7 @@
       Connector Status:
       ========================================
       {% for test in connector_tests.results %}
-      
+
       {{ test.item.name }} Connector:
       - ID: {{ test.item.id }}
       - Test Status: {{ 'SUCCESS' if test.status == 200 else 'FAILED' }}
@@ -226,24 +226,24 @@
       Timestamp: {{ validation_report.timestamp }}
       Account: {{ validation_report.account_id }}
       Project: {{ validation_report.project }}
-      
+
       ✓ API Authentication: {{ validation_report.api_authentication }}
-      
+
       DELEGATE STATUS:
       - Total Delegates: {{ validation_report.delegate.total }}
       - K8s Ready Pods: {{ validation_report.delegate.k8s_ready }}
-      
+
       CONNECTOR STATUS:
       - GitHub: {{ validation_report.connectors.github }}
       - AWS ECR: {{ validation_report.connectors.aws_ecr }}
       - ROSA Cluster: {{ validation_report.connectors.rosa_cluster }}
-      
+
       RESOURCES CREATED:
       - Services: {{ validation_report.resources.services }}
       - Environments: {{ validation_report.resources.environments }}
       - Pipelines: {{ validation_report.resources.pipelines }}
       - Secrets: {{ validation_report.resources.secrets }}
-      
+
       {% if validation_report.api_authentication == 'SUCCESS' and validation_report.delegate.k8s_ready | int > 0 %}
       STATUS: ✅ VALIDATION SUCCESSFUL
       {% else %}

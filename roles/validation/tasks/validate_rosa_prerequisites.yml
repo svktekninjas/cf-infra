@@ -11,7 +11,7 @@
 - name: "Fail if ROSA quota verification failed"
   fail:
     msg: "❌ ROSA quota verification failed for {{ target_environment }} environment in region {{ aws_region }}"
-  when: 
+  when:
     - verify_rosa_quota | default(false)
     - rosa_quota_result.rc != 0
 
@@ -25,7 +25,7 @@
 - name: "Fail if ROSA AWS permissions verification failed"
   fail:
     msg: "❌ ROSA-specific AWS permissions verification failed for {{ target_environment }} environment"
-  when: 
+  when:
     - verify_aws_permissions | default(false)
     - rosa_permissions_result.rc != 0
 

@@ -17,7 +17,7 @@ prometheus_storage_size: "{{ prometheus_config.storage_size if prometheus_config
 prometheus_retention: "{{ prometheus_config.retention_period if prometheus_config is defined else '15d' }}"
 prometheus_image: "{{ container_images.prometheus }}"
 
-# Grafana Configuration  
+# Grafana Configuration
 grafana_enabled: true
 grafana_namespace: "{{ grafana_config.namespace if grafana_config is defined else monitoring_namespace }}"
 grafana_admin_user: "{{ grafana_config.admin_user if grafana_config is defined else 'admin' }}"

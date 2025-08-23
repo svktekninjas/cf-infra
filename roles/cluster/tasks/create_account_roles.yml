@@ -57,7 +57,7 @@
       "ManagedOpenShift-Worker-Role"
       "ManagedOpenShift-Support-Role"
     )
-    
+
     for role in "${ROLES[@]}"; do
       # Check if role exists
       aws iam get-role --role-name $role >/dev/null 2>&1

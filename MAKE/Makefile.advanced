@@ -1,0 +1,223 @@
+# ADVANCED MAKEFILE TECHNIQUES
+# Demonstrating powerful patterns for real-world use
+
+# ============================================================
+# TECHNIQUE 1: DYNAMIC TARGET GENERATION
+# ============================================================
+
+ENVIRONMENTS := dev test prod
+SERVICES := api frontend database
+
+# Generate targets for each environment
+define ENV_TEMPLATE
+deploy-$(1):
+	@echo "Deploying to $(1) environment"
+	@echo "Would run: ansible-playbook -e env=$(1) deploy.yml"
+
+rollback-$(1):
+	@echo "Rolling back $(1) environment"
+endef
+
+$(foreach env,$(ENVIRONMENTS),$(eval $(call ENV_TEMPLATE,$(env))))
+
+# ============================================================
+# TECHNIQUE 2: AUTOMATIC DEPENDENCY DETECTION
+# ============================================================
+
+# Find all YAML files
+YAML_FILES := $(shell find . -name "*.yml" -o -name "*.yaml" 2>/dev/null)
+# Generate .validated marker files
+VALIDATED_FILES := $(YAML_FILES:%=.validated/%)
+
+# Validate only changed files
+.validated/%.yml: %.yml
+	@mkdir -p $(dir $@)
+	@echo "Validating $<"
+	@yamllint $< && touch $@
+
+.validated/%.yaml: %.yaml
+	@mkdir -p $(dir $@)
+	@echo "Validating $<"
+	@yamllint $< && touch $@
+
+validate-smart: $(VALIDATED_FILES)
+	@echo "All YAML files validated!"
+
+# ============================================================
+# TECHNIQUE 3: CONFIGURATION MANAGEMENT
+# ============================================================
+
+# Load environment-specific config
+-include .env
+-include .env.local
+
+# Set defaults if not in .env
+ENVIRONMENT ?= dev
+AWS_REGION ?= us-east-1
+CLUSTER_NAME ?= rosa-cluster-$(ENVIRONMENT)
+
+show-config:
+	@echo "Current Configuration:"
+	@echo "  ENVIRONMENT: $(ENVIRONMENT)"
+	@echo "  AWS_REGION: $(AWS_REGION)"
+	@echo "  CLUSTER_NAME: $(CLUSTER_NAME)"
+
+# ============================================================
+# TECHNIQUE 4: MULTI-LINE COMMANDS WITH DEFINE
+# ============================================================
+
+define PYTHON_SCRIPT
+import yaml
+import sys
+import json
+
+with open(sys.argv[1], 'r') as f:
+    data = yaml.safe_load(f)
+    print(json.dumps(data, indent=2))
+endef
+export PYTHON_SCRIPT
+
+yaml-to-json:
+	@echo "$$PYTHON_SCRIPT" | python3 - $(FILE)
+
+# ============================================================
+# TECHNIQUE 5: RECURSIVE MAKE FOR SUBDIRECTORIES
+# ============================================================
+
+SUBDIRS := roles playbooks helm-charts
+
+# Run make in all subdirectories
+subdirs:
+	@for dir in $(SUBDIRS); do \
+		if [ -f $$dir/Makefile ]; then \
+			echo "Running make in $$dir"; \
+			$(MAKE) -C $$dir $(TARGET); \
+		fi; \
+	done
+
+# ============================================================
+# TECHNIQUE 6: GUARD PATTERNS (REQUIRED VARIABLES)
+# ============================================================
+
+guard-%:
+	@if [ -z '${${*}}' ]; then \
+		echo "ERROR: Variable $* is not set"; \
+		echo "Usage: make <target> $*=<value>"; \
+		exit 1; \
+	fi
+
+# Example: requires CLUSTER_NAME to be set
+delete-cluster: guard-CLUSTER_NAME
+	@echo "Would delete cluster: $(CLUSTER_NAME)"
+	@echo "rosa delete cluster --cluster=$(CLUSTER_NAME)"
+
+# ============================================================
+# TECHNIQUE 7: TIMESTAMP AND LOGGING
+# ============================================================
+
+LOG_DIR := logs
+LOG_FILE := $(LOG_DIR)/make_$(shell date +%Y%m%d_%H%M%S).log
+
+# Wrapper to log any target
+logged-%: | $(LOG_DIR)
+	@echo "Running $* with logging to $(LOG_FILE)"
+	@$(MAKE) $* 2>&1 | tee $(LOG_FILE)
+
+$(LOG_DIR):
+	@mkdir -p $(LOG_DIR)
+
+# ============================================================
+# TECHNIQUE 8: DRY RUN / WHAT-IF MODE
+# ============================================================
+
+# Add DRY_RUN=1 to any command to see what would happen
+ifdef DRY_RUN
+	EXECUTOR := echo "[DRY RUN] Would execute:"
+else
+	EXECUTOR := 
+endif
+
+dangerous-operation:
+	$(EXECUTOR) rm -rf /important/files
+	$(EXECUTOR) kubectl delete namespace production
+
+# ============================================================
+# TECHNIQUE 9: PARALLEL JOB CONTROL
+# ============================================================
+
+# These targets can run in parallel
+.PHONY: test-unit test-integration test-security test-performance
+
+test-unit:
+	@echo "Running unit tests..." && sleep 2 && echo "Unit tests done"
+
+test-integration:
+	@echo "Running integration tests..." && sleep 3 && echo "Integration tests done"
+
+test-security:
+	@echo "Running security tests..." && sleep 2 && echo "Security tests done"
+
+test-performance:
+	@echo "Running performance tests..." && sleep 4 && echo "Performance tests done"
+
+# Run all tests (use make -j4 test-all for parallel)
+test-all: test-unit test-integration test-security test-performance
+	@echo "All tests complete!"
+
+# ============================================================
+# TECHNIQUE 10: MAKEFILE INCLUDES AND COMPOSITION
+# ============================================================
+
+# Include other makefiles
+-include Makefile.local    # User's local overrides (ignored by git)
+-include Makefile.ci       # CI-specific targets
+
+# ============================================================
+# TECHNIQUE 11: INTELLIGENT REBUILDS
+# ============================================================
+
+# Only rebuild if source changed (using checksums)
+.build/%.checksum: %
+	@mkdir -p .build
+	@md5sum $< > $@.tmp
+	@if [ ! -f $@ ] || ! diff -q $@ $@.tmp > /dev/null; then \
+		echo "File $< has changed"; \
+		mv $@.tmp $@; \
+	else \
+		echo "File $< unchanged"; \
+		rm $@.tmp; \
+	fi
+
+# ============================================================
+# HELP SYSTEM
+# ============================================================
+
+.DEFAULT_GOAL := help
+
+help:
+	@echo "ADVANCED MAKEFILE TECHNIQUES"
+	@echo ""
+	@echo "Dynamic Targets:"
+	@echo "  make deploy-dev/test/prod    - Deploy to environment"
+	@echo "  make rollback-dev/test/prod  - Rollback environment"
+	@echo ""
+	@echo "Smart Validation:"
+	@echo "  make validate-smart          - Only validate changed files"
+	@echo ""
+	@echo "Configuration:"
+	@echo "  make show-config            - Show current configuration"
+	@echo ""
+	@echo "Guards:"
+	@echo "  make delete-cluster CLUSTER_NAME=xxx  - Requires variable"
+	@echo ""
+	@echo "Logging:"
+	@echo "  make logged-<any-target>    - Run target with logging"
+	@echo ""
+	@echo "Dry Run:"
+	@echo "  make dangerous-operation DRY_RUN=1    - Show what would happen"
+	@echo ""
+	@echo "Parallel Tests:"
+	@echo "  make -j4 test-all          - Run 4 tests in parallel"
+	@echo ""
+	@echo "Subdirectories:"
+	@echo "  make subdirs TARGET=clean  - Run make clean in all subdirs"

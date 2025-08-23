@@ -39,7 +39,7 @@
 
 - name: Include cluster status monitoring
   include_tasks: monitor_cluster_status.yml
-  when: 
+  when:
     - wait_for_cluster_ready | default(true) or (existing_cluster_state | default('') == 'installing')
   tags:
     - cluster
@@ -47,7 +47,7 @@
 
 - name: Include cluster access configuration
   include_tasks: configure_cluster_access.yml
-  when: 
+  when:
     - create_admin_user | default(true)
     - wait_for_cluster_ready | default(true)
   tags:
@@ -63,7 +63,7 @@
 
 - name: Include resource tagging tasks
   include_tasks: apply_resource_tags.yml
-  when: 
+  when:
     - resource_tags is defined
     - not (cluster_cleanup | default(false))
     - not (skip_cluster_creation | default(false))

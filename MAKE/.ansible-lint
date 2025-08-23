@@ -1,0 +1,10 @@
+---
+profile: production
+exclude_paths:
+  - .cache/
+  - .github/
+  - venv/
+  - node_modules/
+skip_list:
+  - yaml[line-length]
+  - role-name  # We have established roles with hyphens (cf-db, cf-deployment, etc.)

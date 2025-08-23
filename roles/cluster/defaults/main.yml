@@ -15,7 +15,7 @@ openshift_version: "{{ supported_openshift_versions[-1] }}"  # Latest supported 
 aws_region: "{{ supported_aws_regions[0] }}"  # Defaults to 'us-east-1'
 multi_az: false
 
-# STS Configuration  
+# STS Configuration
 sts_enabled: true
 mode: "auto"
 operator_roles_prefix_auto: true

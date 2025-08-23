@@ -188,7 +188,7 @@
       --region {{ cf_db_config.region }} \
       --vpc-id {{ cf_db_created_vpc_id }} \
       --internet-gateway-id {{ new_igw_creation.stdout }}
-  when: 
+  when:
     - existing_igw_check.stdout == "None"
     - new_igw_creation.stdout is defined
   environment:
@@ -224,7 +224,7 @@
       --route-table-id {{ main_route_table_result.stdout }} \
       --destination-cidr-block 0.0.0.0/0 \
       --gateway-id {{ cf_db_igw_id }}
-  when: 
+  when:
     - main_route_table_result.stdout is defined
     - cf_db_igw_id is defined and cf_db_igw_id != ""
   failed_when: false  # Route might already exist

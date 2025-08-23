@@ -66,18 +66,18 @@
     content: |
       # ROSA Cluster Information - {{ target_environment }} Environment
       Generated on: {{ ansible_date_time.iso8601 }}
-      
+
       ## Cluster Details
       - Name: {{ full_cluster_name }}
       - State: {{ cluster_data.state | default('unknown') if cluster_data is defined else 'unknown' }}
       - Version: {{ cluster_data.version.raw_id | default('pending') if cluster_data is defined else 'pending' }}
       - Region: {{ aws_region }}
       - Environment: {{ target_environment }}
-      
+
       ## Access URLs
       - API URL: {{ cluster_data.api.url | default('pending') if (cluster_data is defined and cluster_data.api is defined) else 'pending' }}
       - Console URL: {{ cluster_data.console.url | default('pending') if (cluster_data is defined and cluster_data.console is defined) else 'pending' }}
-      
+
       ## Authentication
       {% if admin_username is defined %}
       - Admin Username: {{ admin_username }}
@@ -89,7 +89,7 @@
       {% if identity_provider is defined and identity_provider.enabled | default(false) %}
       - Identity Provider: {{ identity_provider.type }} ({{ identity_provider.name }})
       {% endif %}
-      
+
       ## Configuration
       - Compute Nodes: {{ compute_nodes }}
       - Machine Type: {{ compute_machine_type }}
@@ -103,16 +103,16 @@
       - PrivateLink: {{ privatelink_enabled | default(false) }}
       - FIPS: {{ enable_fips | default(false) }}
       - ETCD Encryption: {{ enable_etcd_encryption | default(false) }}
-      
+
       ## Network Configuration
       - Machine CIDR: {{ machine_cidr }}
       - Service CIDR: {{ service_cidr }}
       - Pod CIDR: {{ pod_cidr }}
       - Host Prefix: {{ host_prefix }}
-      
+
       ## OIDC Configuration
       - OIDC Config ID: {{ oidc_config_id }}
-      
+
       ---
       This file was generated automatically by the ROSA Ansible cluster role.
     dest: "{{ ansible_env_path }}/cluster-info-{{ target_environment }}.md"
@@ -138,16 +138,16 @@
       #!/bin/bash
       # ROSA Cluster kubectl configuration for {{ target_environment }}
       # Generated on: {{ ansible_date_time.iso8601 }}
-      
+
       echo "🔗 Connecting to ROSA cluster: {{ full_cluster_name }}"
       echo "📍 Environment: {{ target_environment }}"
       echo "🌐 Region: {{ aws_region }}"
       echo ""
-      
+
       # Get the login command
       echo "Getting cluster login command..."
       rosa describe cluster -c {{ full_cluster_name }} | grep "oc login"
-      
+
       echo ""
       echo "💡 To configure kubectl access:"
       echo "1. Run the 'oc login' command shown above"

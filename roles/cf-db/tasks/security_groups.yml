@@ -135,8 +135,8 @@
       --protocol tcp \
       --port {{ cf_db_config.security_group.db_port }} \
       --source-group {{ cf_db_config.openshift_sg_id }}
-  when: 
-    - cf_db_config.openshift_sg_id is defined 
+  when:
+    - cf_db_config.openshift_sg_id is defined
     - cf_db_config.openshift_sg_id != ""
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"

@@ -59,7 +59,7 @@
 - name: Display AWS identity
   debug:
     msg: "AWS Account: {{ (aws_identity.stdout | from_json).Account }}, User: {{ (aws_identity.stdout | from_json).Arn }}"
-  when: 
+  when:
     - enable_cross_account_ecr | bool
     - aws_identity.rc == 0
 

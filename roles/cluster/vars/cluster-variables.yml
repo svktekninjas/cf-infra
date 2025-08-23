@@ -100,7 +100,7 @@ rosa_commands:
 # Default timeout values (in seconds)
 timeout_values:
   cluster_creation: 3600     # 1 hour
-  cluster_deletion: 1800     # 30 minutes  
+  cluster_deletion: 1800     # 30 minutes
   cluster_ready_check: 300   # 5 minutes
   oidc_creation: 600         # 10 minutes
   account_roles: 600         # 10 minutes

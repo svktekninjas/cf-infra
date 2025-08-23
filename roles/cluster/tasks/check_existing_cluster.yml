@@ -55,17 +55,17 @@
 - name: "Prompt user for action on existing cluster (interactive mode)"
   pause:
     prompt: |
-      
+
       ⚠️  Cluster '{{ full_cluster_name }}' already exists!
-      
+
       What would you like to do?
       1. Use existing cluster (skip creation)
       2. Delete existing cluster and recreate
       3. Abort (exit without changes)
-      
+
       Please enter your choice (1/2/3)
   register: user_cluster_choice
-  when: 
+  when:
     - existing_cluster_check.rc == 0
     - interactive_mode | default(false)
   tags:
@@ -84,7 +84,7 @@
       {%- else -%}
       invalid
       {%- endif -%}
-  when: 
+  when:
     - existing_cluster_check.rc == 0
     - interactive_mode | default(false)
     - user_cluster_choice is defined
@@ -95,7 +95,7 @@
 - name: "Fail on invalid user choice"
   fail:
     msg: "❌ Invalid choice '{{ user_cluster_choice.user_input }}'. Please run again and choose 1, 2, or 3."
-  when: 
+  when:
     - existing_cluster_check.rc == 0
     - cluster_action == "invalid"
   tags:
@@ -105,7 +105,7 @@
 - name: "Abort on user request"
   fail:
     msg: "🛑 Cluster creation aborted by user request."
-  when: 
+  when:
     - existing_cluster_check.rc == 0
     - cluster_action == "abort"
   tags:
@@ -131,7 +131,7 @@
 - name: "Set skip cluster creation flag"
   set_fact:
     skip_cluster_creation: true
-  when: 
+  when:
     - existing_cluster_check.rc == 0
     - cluster_action == "use_existing"
   tags:
@@ -142,7 +142,7 @@
   set_fact:
     delete_existing_cluster: true
     skip_cluster_creation: false
-  when: 
+  when:
     - existing_cluster_check.rc == 0
     - cluster_action == "delete_recreate"
   tags:

@@ -82,7 +82,7 @@
       - Ansible environment path: {{ ansible_env_path }}
       - Config file: {{ env_file_path }}
       - ROSA token added to environment file
-      
+
       To use the environment variables, run:
       source {{ env_file_path }}
   tags: rosa

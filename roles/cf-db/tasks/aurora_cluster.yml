@@ -201,14 +201,14 @@
       Cluster: {{ cf_db_config.database.cluster_name }}
       Status: {{ cf_db_cluster_status }}
       Region: {{ cf_db_config.region }}
-      
+
       Aurora cluster creation typically takes 30-40 minutes.
-      
+
       You have two options:
       1. Press 'C' + Enter to continue waiting (will check status every 2 minutes)
       2. Press Ctrl+C to abort and re-run later with:
          ansible-playbook playbooks/main.yml --tags aurora -e "target_environment=dev" -e "aws_profile=sid-KS"
-      
+
       The playbook will automatically check cluster status and continue when ready.
       Press 'C' + Enter to continue...
   when: cf_db_cluster_status == "creating"
@@ -221,21 +221,21 @@
   shell: |
     echo "⏳ Checking Aurora cluster status..."
     echo "Initial status: {{ cf_db_cluster_status }}"
-    
+
     # Check for up to 60 minutes with 2-minute intervals
     MAX_CHECKS=30
     CHECK_COUNT=0
-    
+
     while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
       STATUS=$(aws rds describe-db-clusters \
         --region {{ cf_db_config.region }} \
         --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
         --query "DBClusters[0].Status" \
         --output text 2>/dev/null || echo "error")
-      
+
       CURRENT_TIME=$(date "+%H:%M:%S")
       echo "[$CURRENT_TIME] Check #$((CHECK_COUNT + 1)): Cluster status = $STATUS"
-      
+
       if [ "$STATUS" = "available" ]; then
         echo "✅ Aurora cluster is now available!"
         exit 0
@@ -243,15 +243,15 @@
         echo "❌ Aurora cluster creation failed!"
         exit 1
       fi
-      
+
       CHECK_COUNT=$((CHECK_COUNT + 1))
-      
+
       if [ $CHECK_COUNT -lt $MAX_CHECKS ]; then
         echo "Still creating... waiting 2 minutes before next check ($(($MAX_CHECKS - $CHECK_COUNT)) checks remaining)"
         sleep 120
       fi
     done
-    
+
     echo "⚠️ Timeout reached after 60 minutes. Cluster may still be creating."
     echo "Current status: $STATUS"
     exit 2
@@ -361,7 +361,7 @@
   loop: "{{ aurora_instances_status_check.results }}"
   loop_control:
     extended: true
-  when: 
+  when:
     - cluster_ready_check.stdout == "available"
     - item.stdout.split()[1] == "None" or item.stdout.split()[1] == ""
   environment:
@@ -404,13 +404,13 @@
       - "'us-west-1b' in final_instances_status.stdout"
     fail_msg: |
       ❌ Aurora Multi-AZ deployment validation failed
-      
+
       Current instances: {{ final_instances_status.stdout_lines | length }}
       Expected: At least 2 instances across us-west-1a and us-west-1b
-      
+
       Instance Details:
       {{ final_instances_status.stdout }}
-      
+
       Manual Actions:
       1. Check AWS Console for instance creation status
       2. Verify AZ availability in us-west-1

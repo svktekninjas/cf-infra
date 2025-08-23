@@ -43,12 +43,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          
+
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
@@ -56,18 +56,18 @@ jobs:
           key: ${{ runner.os }}-pip-yamllint-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-yamllint-
-            
+
       - name: Install yamllint
         run: |
           pip install --upgrade pip
           pip install yamllint==${{ env.YAMLLINT_VERSION }}
-          
+
       - name: Create yamllint config
         run: |
           cat > .yamllint << 'EOF'
           ---
           extends: default
-          
+
           rules:
             line-length:
               max: 160
@@ -84,20 +84,20 @@ jobs:
               indent-sequences: consistent
             truthy:
               allowed-values: ['true', 'false', 'yes', 'no', 'True', 'False']
-          
+
           ignore: |
             .github/
             .cache/
             molecule/
           EOF
-          
+
       - name: Run yamllint
         run: |
           yamllint --version
           yamllint -c .yamllint . || true  # Don't fail on warnings
           yamllint -c .yamllint --strict . 2>&1 | tee yamllint-report.txt
         continue-on-error: true
-        
+
       - name: Upload yamllint report
         uses: actions/upload-artifact@v4
         if: always()
@@ -113,12 +113,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          
+
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
@@ -126,40 +126,40 @@ jobs:
           key: ${{ runner.os }}-pip-ansible-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-ansible-
-            
+
       - name: Install Ansible and ansible-lint
         run: |
           pip install --upgrade pip
           pip install ansible==${{ env.ANSIBLE_VERSION }}
           pip install ansible-lint==${{ env.ANSIBLE_LINT_VERSION }}
           pip install jmespath  # For JSON queries in Ansible
-          
+
       - name: Create ansible-lint config
         run: |
           cat > .ansible-lint << 'EOF'
           ---
           profile: production
-          
+
           exclude_paths:
             - .cache/
             - .github/
             - molecule/
-            
+
           enable_list:
             - fqcn-builtins
             - no-log-password
             - no-same-owner
             - name[prefix]
-            
+
           skip_list:
             - yaml[line-length]  # Handled by yamllint
             - name[missing]  # Allow some tasks without names
-            
+
           warn_list:
             - command-instead-of-shell
             - deprecated-command-syntax
             - experimental
-            
+
           kinds:
             - tasks: "**/tasks/*.yml"
             - vars: "**/vars/*.yml"
@@ -167,20 +167,20 @@ jobs:
             - meta: "**/meta/*.yml"
             - handlers: "**/handlers/*.yml"
           EOF
-          
+
       - name: Run ansible-lint
         run: |
           ansible-lint --version
           ansible-lint --force-color --parseable-severity 2>&1 | tee ansible-lint-report.txt
         continue-on-error: true
-        
+
       - name: Check for critical errors
         run: |
           if grep -E "^\[ERROR\]|^\[CRITICAL\]" ansible-lint-report.txt; then
             echo "Critical errors found in ansible-lint"
             exit 1
           fi
-          
+
       - name: Upload ansible-lint report
         uses: actions/upload-artifact@v4
         if: always()
@@ -199,12 +199,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          
+
       - name: Install Ansible
         run: |
           pip install --upgrade pip
@@ -213,14 +213,14 @@ jobs:
           pip install openshift   # For OpenShift modules
           pip install boto3       # For AWS modules
           pip install requests    # For URI module
-          
+
       - name: Check playbook syntax
         run: |
           for playbook in playbooks/*.yml; do
             echo "Checking syntax for: $playbook"
             ansible-playbook --syntax-check "$playbook" -e env=${{ matrix.environment }} || exit 1
           done
-          
+
       - name: Check role syntax
         run: |
           for role in roles/*/; do
@@ -244,7 +244,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Run Trivy security scanner
         uses: aquasecurity/trivy-action@v0.17.0
         with:
@@ -253,13 +253,13 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
-          
+
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
-          
+
       - name: Check for secrets
         run: |
           pip install detect-secrets
@@ -274,17 +274,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install pyyaml jinja2 jsonschema
-          
+
       - name: Create variable validator script
         run: |
           cat > validate_vars.py << 'EOF'
@@ -294,7 +294,7 @@ jobs:
           import os
           from pathlib import Path
           import json
-          
+
           def check_undefined_vars(file_path):
               """Check for undefined variables in Ansible files"""
               errors = []
@@ -303,7 +303,7 @@ jobs:
                   # Look for {{ variable }} patterns
                   import re
                   vars_used = re.findall(r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\||\})', content)
-                  
+
                   # Check if variables are defined
                   for var in vars_used:
                       if var not in ['item', 'ansible_facts', 'hostvars', 'groups', 'inventory_hostname']:
@@ -311,13 +311,13 @@ jobs:
                           if not check_var_defined(var, file_path):
                               errors.append(f"Undefined variable '{var}' in {file_path}")
               return errors
-          
+
           def check_var_defined(var_name, file_path):
               """Check if variable is defined in role defaults or vars"""
               role_path = Path(file_path).parent.parent
               defaults_file = role_path / 'defaults' / 'main.yml'
               vars_file = role_path / 'vars' / 'main.yml'
-              
+
               for var_file in [defaults_file, vars_file]:
                   if var_file.exists():
                       with open(var_file, 'r') as f:
@@ -328,7 +328,7 @@ jobs:
                           except:
                               pass
               return False
-          
+
           def check_reserved_names(file_path):
               """Check for Ansible reserved variable names"""
               reserved = ['environment', 'action', 'role', 'inventory', 'play', 'task']
@@ -343,7 +343,7 @@ jobs:
                   except:
                       pass
               return errors
-          
+
           def validate_types(file_path):
               """Validate variable types"""
               errors = []
@@ -354,17 +354,17 @@ jobs:
                       if '{{ environment }}' in content:
                           errors.append(f"Type mismatch: 'environment' used as both list and string in {file_path}")
               return errors
-          
+
           def main():
               all_errors = []
-              
+
               # Check all YAML files
               for yaml_file in Path('.').rglob('*.yml'):
                   if '.github' not in str(yaml_file):
                       all_errors.extend(check_undefined_vars(yaml_file))
                       all_errors.extend(check_reserved_names(yaml_file))
                       all_errors.extend(validate_types(yaml_file))
-              
+
               if all_errors:
                   print("Variable validation errors found:")
                   for error in all_errors:
@@ -372,12 +372,12 @@ jobs:
                   sys.exit(1)
               else:
                   print("✓ All variables validated successfully")
-          
+
           if __name__ == "__main__":
               main()
           EOF
           chmod +x validate_vars.py
-          
+
       - name: Run variable validation
         run: python validate_vars.py
         continue-on-error: true
@@ -397,24 +397,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          
+
       - name: Install Molecule
         run: |
           pip install --upgrade pip
           pip install molecule==${{ env.MOLECULE_VERSION }}
           pip install molecule-plugins[docker]
           pip install ansible==${{ env.ANSIBLE_VERSION }}
-          
+
       - name: Create Molecule scenario
         run: |
           cd roles/${{ matrix.role }}
           molecule init scenario default --driver-name docker || true
-          
+
       - name: Run Molecule tests
         run: |
           cd roles/${{ matrix.role }}
@@ -428,7 +428,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Check for README files
         run: |
           missing_docs=()
@@ -437,13 +437,13 @@ jobs:
               missing_docs+=("$role")
             fi
           done
-          
+
           if [ ${#missing_docs[@]} -gt 0 ]; then
             echo "Missing README.md in roles:"
             printf '%s\n' "${missing_docs[@]}"
             exit 1
           fi
-          
+
       - name: Check for meta/main.yml
         run: |
           missing_meta=()
@@ -452,7 +452,7 @@ jobs:
               missing_meta+=("$role")
             fi
           done
-          
+
           if [ ${#missing_meta[@]} -gt 0 ]; then
             echo "Missing meta/main.yml in roles:"
             printf '%s\n' "${missing_meta[@]}"
@@ -470,12 +470,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: reports
-          
+
       - name: Generate summary report
         run: |
           echo "## Ansible CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           # Check job statuses
           echo "### Job Results" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
@@ -486,10 +486,10 @@ jobs:
           echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Variable Validation | ${{ needs.variable-validation.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Documentation | ${{ needs.documentation-check.result }} |" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Reports" >> $GITHUB_STEP_SUMMARY
-          
+
           # Add report summaries if they exist
           if [ -f reports/yamllint-report/yamllint-report.txt ]; then
             echo "#### YAML Lint Issues" >> $GITHUB_STEP_SUMMARY
@@ -497,14 +497,14 @@ jobs:
             head -20 reports/yamllint-report/yamllint-report.txt >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ -f reports/ansible-lint-report/ansible-lint-report.txt ]; then
             echo "#### Ansible Lint Issues" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             head -20 reports/ansible-lint-report/ansible-lint-report.txt >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
-          
+
       - name: Comment on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -512,7 +512,7 @@ jobs:
           script: |
             const summary = `
             ## 🤖 Ansible CI Results
-            
+
             | Check | Status |
             |-------|--------|
             | YAML Lint | ${{ needs.yaml-lint.result }} |
@@ -521,10 +521,10 @@ jobs:
             | Security | ${{ needs.security-scan.result }} |
             | Variables | ${{ needs.variable-validation.result }} |
             | Docs | ${{ needs.documentation-check.result }} |
-            
+
             View full reports in the workflow artifacts.
             `;
-            
+
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,

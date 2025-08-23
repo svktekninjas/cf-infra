@@ -24,7 +24,7 @@ service_configs:
     target_port: 3000
     route_name: "grafana-route"
   prometheus:
-    service_name: "prometheus" 
+    service_name: "prometheus"
     target_port: 9090
     route_name: "prometheus-route"
 
@@ -48,7 +48,7 @@ validation_config:
   http_timeout: 10
   expected_status_codes:
     - "200"
-    - "301" 
+    - "301"
     - "302"
     - "401"  # Grafana login page
   retry_attempts: 3

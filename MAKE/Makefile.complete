@@ -1,0 +1,313 @@
+# Complete Makefile Template for Ansible/DevOps Projects
+# Incorporates all best practices and common patterns
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
+
+# Load environment variables
+-include .env
+-include .env.$(ENVIRONMENT)
+
+# Project settings
+PROJECT_NAME ?= ansible-rosa
+ENVIRONMENT ?= dev
+AWS_PROFILE ?= default
+ANSIBLE_VAULT_PASSWORD_FILE ?= .vault_pass
+
+# Tool versions
+ANSIBLE_VERSION := 11.5.0
+TERRAFORM_VERSION := 1.5.0
+
+# Directories
+ROLES_DIR := roles
+PLAYBOOKS_DIR := playbooks
+INVENTORY_DIR := inventory
+TESTS_DIR := tests
+DOCS_DIR := docs
+
+# Colors
+RED := \033[0;31m
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+BLUE := \033[0;34m
+NC := \033[0m
+
+# ============================================================
+# HELP & DOCUMENTATION
+# ============================================================
+
+.PHONY: help
+help: ## Show this help message
+	@echo "$(BLUE)╔════════════════════════════════════════════╗$(NC)"
+	@echo "$(BLUE)║     $(PROJECT_NAME) Makefile Help      ║$(NC)"
+	@echo "$(BLUE)╚════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Usage:$(NC)"
+	@echo "  make [target] [VARIABLE=value]"
+	@echo ""
+	@echo "$(YELLOW)Main Targets:$(NC)"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		grep -v '^[[:space:]]' | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}' | \
+		sort
+	@echo ""
+	@echo "$(YELLOW)Variables:$(NC)"
+	@echo "  ENVIRONMENT  = $(ENVIRONMENT)"
+	@echo "  AWS_PROFILE  = $(AWS_PROFILE)"
+	@echo "  PROJECT_NAME = $(PROJECT_NAME)"
+
+# ============================================================
+# INSTALLATION & SETUP
+# ============================================================
+
+.PHONY: install
+install: install-ansible install-tools install-pre-commit ## Install all dependencies
+
+.PHONY: install-ansible
+install-ansible: ## Install Ansible and related tools
+	@echo "$(GREEN)Installing Ansible $(ANSIBLE_VERSION)...$(NC)"
+	@pip3 install --upgrade pip
+	@pip3 install ansible==$(ANSIBLE_VERSION) ansible-lint yamllint
+	@echo "$(GREEN)✓ Ansible installed$(NC)"
+
+.PHONY: install-tools
+install-tools: ## Install required CLI tools
+	@echo "$(GREEN)Installing CLI tools...$(NC)"
+	@which aws || (echo "Please install AWS CLI" && exit 1)
+	@which rosa || (echo "Installing ROSA CLI..." && brew install rosa-cli)
+	@which oc || (echo "Installing OpenShift CLI..." && brew install openshift-cli)
+	@echo "$(GREEN)✓ Tools installed$(NC)"
+
+.PHONY: install-pre-commit
+install-pre-commit: ## Setup pre-commit hooks
+	@echo "$(GREEN)Setting up pre-commit hooks...$(NC)"
+	@pip3 install pre-commit
+	@pre-commit install
+	@echo "$(GREEN)✓ Pre-commit installed$(NC)"
+
+# ============================================================
+# DEVELOPMENT WORKFLOW
+# ============================================================
+
+.PHONY: develop
+develop: ## Start development environment
+	@echo "$(GREEN)Starting development environment...$(NC)"
+	@$(MAKE) install
+	@$(MAKE) validate
+	@echo "$(GREEN)✓ Ready for development$(NC)"
+
+.PHONY: check
+check: lint validate test ## Run all checks (lint, validate, test)
+
+.PHONY: ci
+ci: ## Run CI pipeline locally
+	@echo "$(BLUE)Running CI pipeline...$(NC)"
+	@$(MAKE) check
+	@$(MAKE) security-scan
+	@echo "$(GREEN)✓ CI pipeline passed$(NC)"
+
+# ============================================================
+# ANSIBLE OPERATIONS
+# ============================================================
+
+.PHONY: deploy
+deploy: guard-ENVIRONMENT validate ## Deploy to environment (requires ENVIRONMENT)
+	@echo "$(BLUE)Deploying to $(ENVIRONMENT)...$(NC)"
+	ansible-playbook $(PLAYBOOKS_DIR)/main.yml \
+		-e "target_environment=$(ENVIRONMENT)" \
+		-e "aws_profile=$(AWS_PROFILE)"
+
+.PHONY: deploy-check
+deploy-check: ## Dry run deployment (check mode)
+	ansible-playbook $(PLAYBOOKS_DIR)/main.yml \
+		-e "target_environment=$(ENVIRONMENT)" \
+		--check --diff
+
+.PHONY: rollback
+rollback: guard-ENVIRONMENT guard-VERSION ## Rollback to specific version
+	@echo "$(YELLOW)Rolling back $(ENVIRONMENT) to $(VERSION)...$(NC)"
+	ansible-playbook $(PLAYBOOKS_DIR)/rollback.yml \
+		-e "target_environment=$(ENVIRONMENT)" \
+		-e "version=$(VERSION)"
+
+.PHONY: encrypt-secrets
+encrypt-secrets: ## Encrypt sensitive files with Ansible Vault
+	@echo "$(GREEN)Encrypting secrets...$(NC)"
+	@find . -name "vault*.yml" -o -name "*vault.yml" | \
+		xargs -I {} ansible-vault encrypt {}
+
+.PHONY: decrypt-secrets
+decrypt-secrets: ## Decrypt vault files
+	@echo "$(YELLOW)Decrypting secrets...$(NC)"
+	@find . -name "vault*.yml" -o -name "*vault.yml" | \
+		xargs -I {} ansible-vault decrypt {}
+
+# ============================================================
+# LINTING & VALIDATION
+# ============================================================
+
+.PHONY: lint
+lint: lint-yaml lint-ansible lint-shell ## Run all linters
+
+.PHONY: lint-yaml
+lint-yaml: ## Lint YAML files
+	@echo "$(GREEN)Linting YAML files...$(NC)"
+	@yamllint -c .yamllint . || (echo "$(RED)✗ YAML lint failed$(NC)" && exit 1)
+
+.PHONY: lint-ansible
+lint-ansible: ## Lint Ansible playbooks and roles
+	@echo "$(GREEN)Linting Ansible files...$(NC)"
+	@ansible-lint --force-color || (echo "$(RED)✗ Ansible lint failed$(NC)" && exit 1)
+
+.PHONY: lint-shell
+lint-shell: ## Lint shell scripts
+	@echo "$(GREEN)Linting shell scripts...$(NC)"
+	@find . -name "*.sh" -exec shellcheck {} \; || true
+
+.PHONY: validate
+validate: validate-syntax validate-inventory ## Validate all configurations
+
+.PHONY: validate-syntax
+validate-syntax: ## Validate Ansible syntax
+	@echo "$(GREEN)Validating Ansible syntax...$(NC)"
+	@find $(PLAYBOOKS_DIR) -name "*.yml" -exec \
+		ansible-playbook --syntax-check {} \;
+
+.PHONY: validate-inventory
+validate-inventory: ## Validate inventory
+	@echo "$(GREEN)Validating inventory...$(NC)"
+	@ansible-inventory -i $(INVENTORY_DIR) --list > /dev/null
+
+# ============================================================
+# TESTING
+# ============================================================
+
+.PHONY: test
+test: test-unit test-integration ## Run all tests
+
+.PHONY: test-unit
+test-unit: ## Run unit tests
+	@echo "$(GREEN)Running unit tests...$(NC)"
+	@pytest $(TESTS_DIR)/unit -v
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	@echo "$(GREEN)Running integration tests...$(NC)"
+	@pytest $(TESTS_DIR)/integration -v
+
+.PHONY: test-role
+test-role: guard-ROLE ## Test specific role (requires ROLE=name)
+	@echo "$(GREEN)Testing role: $(ROLE)$(NC)"
+	@cd $(ROLES_DIR)/$(ROLE) && molecule test
+
+# ============================================================
+# SECURITY
+# ============================================================
+
+.PHONY: security-scan
+security-scan: scan-secrets scan-vulnerabilities ## Run security scans
+
+.PHONY: scan-secrets
+scan-secrets: ## Scan for exposed secrets
+	@echo "$(GREEN)Scanning for secrets...$(NC)"
+	@which detect-secrets || pip3 install detect-secrets
+	@detect-secrets scan --baseline .secrets.baseline
+
+.PHONY: scan-vulnerabilities
+scan-vulnerabilities: ## Scan for vulnerabilities
+	@echo "$(GREEN)Scanning for vulnerabilities...$(NC)"
+	@safety check || true
+
+# ============================================================
+# CLEANUP & MAINTENANCE
+# ============================================================
+
+.PHONY: clean
+clean: clean-cache clean-temp clean-logs ## Clean all temporary files
+
+.PHONY: clean-cache
+clean-cache: ## Clean cache files
+	@echo "$(GREEN)Cleaning cache...$(NC)"
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@rm -rf .ansible-cache 2>/dev/null || true
+
+.PHONY: clean-temp
+clean-temp: ## Clean temporary files
+	@echo "$(GREEN)Cleaning temporary files...$(NC)"
+	@find . -type f -name "*.tmp" -delete
+	@find . -type f -name "*.bak" -delete
+	@find . -type f -name ".DS_Store" -delete 2>/dev/null || true
+
+.PHONY: clean-logs
+clean-logs: ## Clean log files
+	@echo "$(GREEN)Cleaning logs...$(NC)"
+	@rm -rf logs/*.log 2>/dev/null || true
+
+# ============================================================
+# UTILITIES
+# ============================================================
+
+.PHONY: shell
+shell: ## Start interactive shell with environment loaded
+	@echo "$(GREEN)Starting shell with environment...$(NC)"
+	@AWS_PROFILE=$(AWS_PROFILE) \
+	 ENVIRONMENT=$(ENVIRONMENT) \
+	 PS1="[\033[32m$(PROJECT_NAME):$(ENVIRONMENT)\033[0m] $$ " \
+	 bash
+
+.PHONY: watch
+watch: ## Watch for changes and run tests
+	@echo "$(GREEN)Watching for changes...$(NC)"
+	@which fswatch || brew install fswatch
+	@fswatch -o . | xargs -n1 -I{} $(MAKE) check
+
+.PHONY: docs
+docs: ## Generate documentation
+	@echo "$(GREEN)Generating documentation...$(NC)"
+	@ansible-doc -t inventory -l > $(DOCS_DIR)/inventory.txt
+	@ansible-doc -t module -l > $(DOCS_DIR)/modules.txt
+
+.PHONY: graph
+graph: ## Generate dependency graph
+	@echo "$(GREEN)Generating dependency graph...$(NC)"
+	@ansible-inventory -i $(INVENTORY_DIR) --graph
+
+# ============================================================
+# GUARDS & HELPERS
+# ============================================================
+
+guard-%: ## Require variable to be set
+	@if [ -z '${${*}}' ]; then \
+		echo "$(RED)ERROR: Variable $* is not set$(NC)"; \
+		echo "Usage: make <target> $*=<value>"; \
+		exit 1; \
+	fi
+
+confirm: ## Ask for confirmation
+	@echo -n "$(YELLOW)Are you sure? [y/N]$(NC) " && read ans && [ $${ans:-N} = y ]
+
+.PHONY: debug
+debug: ## Show debug information
+	@echo "$(BLUE)Debug Information:$(NC)"
+	@echo "PATH: $$PATH"
+	@echo "Shell: $$SHELL"
+	@echo "Make version: $(MAKE_VERSION)"
+	@echo "Working directory: $$(pwd)"
+	@echo "User: $$(whoami)"
+	@echo "Date: $$(date)"
+
+# ============================================================
+# SHORTCUTS & ALIASES
+# ============================================================
+
+.PHONY: d dev p prod t test
+d: deploy ENVIRONMENT=dev    ## Shortcut: deploy to dev
+p: deploy ENVIRONMENT=prod   ## Shortcut: deploy to prod
+t: test                      ## Shortcut: run tests
+dev: ENVIRONMENT=dev deploy  ## Deploy to dev
+prod: confirm ENVIRONMENT=prod deploy ## Deploy to prod (with confirmation)

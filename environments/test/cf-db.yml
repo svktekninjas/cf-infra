@@ -5,12 +5,12 @@ cf_db_config:
   availability_zones:
     - us-east-1a
     - us-east-1b
-  
+
   # VPC Configuration
   vpc_id: "{{ vpc_id | default('') }}"
   public_subnet_id: "{{ public_subnet_id | default('') }}"
   openshift_sg_id: "{{ openshift_sg_id | default('') }}"
-  
+
   # Private Subnets Configuration (2 AZs)
   private_subnets:
     - cidr: "10.0.12.0/24"
@@ -19,11 +19,11 @@ cf_db_config:
     - cidr: "10.0.13.0/24"
       az: "us-east-1b"
       name: "cf-private-subnet-test-1b"
-  
+
   # Route Table Configuration
   route_table:
     name: "cf-private-rt-test"
-  
+
   # Security Group Configuration
   security_group:
     name: "cf-aurora-db-sg-test"
@@ -35,7 +35,7 @@ cf_db_config:
       - "192.168.0.0/16" # Additional VPC CIDR (example)
     allowed_security_groups:
       - "{{ openshift_sg_id }}"  # OpenShift security group
-  
+
   # Database Configuration
   database:
     engine: "aurora-postgresql"
@@ -48,7 +48,7 @@ cf_db_config:
     backup_retention_period: 14
     preferred_backup_window: "07:00-09:00"
     publicly_accessible: false
-    
+
     # Aurora Cluster Instances (2 AZs)
     instances:
       - identifier: "cf-aurora-pg-writer-test"
@@ -57,7 +57,7 @@ cf_db_config:
       - identifier: "cf-aurora-pg-reader-test"
         instance_class: "db.t3.medium"
         az: "us-east-1b"
-    
+
   # DB Subnet Group Configuration
   db_subnet_group:
     name: "cf-private-db-subnet-group-test"

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: ecr-credentials-sync
     app.kubernetes.io/version: "1.0"
   name: ecr-credentials-sync
-  namespace: cf-dev 
+  namespace: cf-dev
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
@@ -41,14 +41,14 @@ spec:
           mkdir -p /tmp/.aws
           export AWS_CONFIG_FILE=/tmp/.aws/config
           export AWS_SHARED_CREDENTIALS_FILE=/tmp/.aws/credentials
-          
-          
+
+
           while true; do
             CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
             # ECR Initialization
             aws ecr get-login-password --region ${REGION} > /token/ecr-token
             cd /tmp && /usr/bin/curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
-            python3 -c "import tarfile; import os; tar=tarfile.open('/tmp/openshift-client-linux.tar.gz', 'r:gz'); tar.extractall('/tmp'); tar.close(); os.system('ls -la /tmp/oc')"                                                                                                                                 
+            python3 -c "import tarfile; import os; tar=tarfile.open('/tmp/openshift-client-linux.tar.gz', 'r:gz'); tar.extractall('/tmp'); tar.close(); os.system('ls -la /tmp/oc')"
             # Command for create-secret
             /tmp/oc create secret docker-registry regcred \
                --dry-run=client \

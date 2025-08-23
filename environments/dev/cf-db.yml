@@ -6,14 +6,14 @@ cf_db_config:
   availability_zones:
     - "us-west-1a"
     - "us-west-1b"
-  
+
   # VPC Configuration (Create new VPC with 172.31.0.0/16 CIDR)
   vpc_id: ""  # Empty to trigger VPC creation
   vpc_cidr: "172.31.0.0/16"  # New CIDR range avoiding ROSA cluster conflict
   public_subnet_id: ""  # Will be created with new VPC
   public_subnet_cidr: "172.31.1.0/24"  # Public subnet for NAT Gateway
   openshift_sg_id: ""
-  
+
   # Private Subnets Configuration (Updated for 172.31.0.0/16)
   private_subnets:
     - cidr: "172.31.2.0/24"
@@ -22,11 +22,11 @@ cf_db_config:
     - cidr: "172.31.3.0/24"
       az: "us-west-1b"
       name: "cf-private-subnet-dev-1b"
-  
+
   # Route Table Configuration
   route_table:
     name: "cf-private-rt-dev"
-  
+
   # Security Group Configuration (Updated for new CIDR)
   security_group:
     name: "cf-aurora-db-sg-dev"
@@ -38,7 +38,7 @@ cf_db_config:
       - "172.16.0.0/16"  # Additional private ranges if needed
       - "192.168.0.0/16" # Additional private ranges if needed
     allowed_security_groups: []  # OpenShift security group (empty for now)
-  
+
   # Database Configuration
   database:
     engine: "aurora-postgresql"
@@ -53,14 +53,14 @@ cf_db_config:
     preferred_maintenance_window: "sun:05:00-sun:06:00"
     publicly_accessible: false
     deletion_protection: false
-    
+
     # Parameter Groups
     parameter_group_family: "aurora-postgresql15"
     cluster_parameter_group_name: "cf-aurora-pg-cluster-params-dev"
     cluster_parameter_group_description: "Aurora PostgreSQL cluster parameter group for dev environment"
     instance_parameter_group_name: "cf-aurora-pg-instance-params-dev"
     instance_parameter_group_description: "Aurora PostgreSQL instance parameter group for dev environment"
-    
+
     # Aurora Cluster Instances (2 AZs)
     instances:
       - identifier: "cf-aurora-pg-writer-dev"
@@ -69,7 +69,7 @@ cf_db_config:
       - identifier: "cf-aurora-pg-reader-dev"
         instance_class: "db.t3.medium"
         az: "us-west-1b"
-    
+
   # DB Subnet Group Configuration
   db_subnet_group:
     name: "cf-private-db-subnet-group-dev-v2"
@@ -80,11 +80,11 @@ cf_db_config:
   vpc_peering:
     enabled: true
     description: "VPC peering between Aurora DB VPC and ROSA cluster VPC for dev environment"
-    
+
   # Database creation options
   wait_for_db_ready: false  # Skip waiting for database instances to become available
   db_creation_timeout_minutes: 2  # Quick check timeout (2 minutes)
-  
+
   # Tagging Strategy
   common_tags:
     Environment: "dev"

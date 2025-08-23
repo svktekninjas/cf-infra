@@ -150,18 +150,18 @@
   debug:
     msg: |
       Harness Resources Created:
-      
+
       Services:
       {{ services_list.stdout }}
-      
+
       Environments:
       {{ environments_list_output.stdout }}
-      
+
       {% if enable_pipeline_creation %}
       Pipelines:
       {{ pipelines_list.stdout }}
       {% endif %}
-      
+
       Next Steps:
       1. Log into Harness UI: {{ harness_platform_url }}
       2. Navigate to your project: {{ harness_project_id }}

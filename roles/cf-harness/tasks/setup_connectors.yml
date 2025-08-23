@@ -167,21 +167,21 @@
   debug:
     msg: |
       Connectors Setup Complete:
-      
+
       GitHub Connector:
       - ID: {{ connector_github_id }}
       - Status: {{ 'Connected' if github_test.rc == 0 else 'Connection Failed' }}
-      
+
       AWS ECR Connector:
       - ID: {{ connector_aws_ecr_id }}
       - Status: {{ 'Connected' if ecr_test.rc == 0 else 'Connection Failed' }}
       - Registry: {{ ecr_registry }}
-      
+
       ROSA Cluster Connector:
       - ID: {{ connector_rosa_cluster_id }}
       - Status: {{ 'Connected' if rosa_test.rc == 0 else 'Connection Failed' }}
       - Endpoint: {{ rosa_api_endpoint.stdout }}
-      
+
       All Connectors:
       {{ connector_list.stdout }}
 

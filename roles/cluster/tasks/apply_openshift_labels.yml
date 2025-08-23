@@ -30,7 +30,7 @@
   shell: |
     # Get all namespaces except system ones
     namespaces=$(oc get namespaces -o name | grep -v openshift | grep -v kube | grep -v default)
-    
+
     for ns in $namespaces; do
       echo "Labeling namespace: $ns"
       oc label $ns \
@@ -60,7 +60,7 @@
   shell: |
     # Label all nodes with environment and cluster information
     nodes=$(oc get nodes -o name)
-    
+
     for node in $nodes; do
       echo "Labeling node: $node"
       oc label $node \
@@ -155,7 +155,7 @@
       - "  - Nodes: {{ 'Labeled' if node_labeling is succeeded else 'Skipped' }}"
       - "  - ConfigMap: {{ 'Created' if configmap_creation is succeeded else 'Skipped' }}"
       - "  - Annotations: {{ 'Applied' if cluster_annotations is succeeded else 'Skipped' }}"
-  when: 
+  when:
     - oc_login is defined
     - oc_login is not skipped
     - oc_login is succeeded

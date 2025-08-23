@@ -59,7 +59,7 @@ cf_db_database_defaults:
   preferred_maintenance_window: "sun:05:00-sun:06:00"
   publicly_accessible: false
   deletion_protection: false
-  
+
   # Default Aurora Instances
   instances:
     - identifier: "cf-aurora-pg-writer-default"

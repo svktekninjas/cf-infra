@@ -44,7 +44,7 @@
 - name: "Extract OIDC config ID from list"
   set_fact:
     oidc_config_id: "{{ oidc_config_list.stdout_lines[1].split()[0] }}"
-  when: 
+  when:
     - oidc_config_result is defined and oidc_config_result.changed
     - oidc_config_list.stdout_lines | length > 1
   tags:
@@ -54,7 +54,7 @@
 - name: "Get existing OIDC config ID"
   set_fact:
     oidc_config_id: "{{ existing_oidc_configs.stdout_lines[1].split()[0] }}"
-  when: 
+  when:
     - existing_oidc_configs.stdout_lines | length > 1
     - oidc_config_id is not defined
   tags:
@@ -75,7 +75,7 @@
   shell: |
     # Get OIDC provider ARN based on the config ID
     OIDC_ARN=$(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[?contains(Arn, '{{ oidc_config_id }}')].Arn" --output text 2>/dev/null)
-    
+
     if [ -n "$OIDC_ARN" ]; then
       echo "Tagging OIDC provider: $OIDC_ARN"
       aws iam tag-open-id-connect-provider \
@@ -86,7 +86,7 @@
     fi
   environment:
     AWS_PROFILE: "{{ aws_profile | default('default') }}"
-  when: 
+  when:
     - resource_tags is defined
     - oidc_config_id is defined
   register: oidc_tagging

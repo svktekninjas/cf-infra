@@ -106,7 +106,7 @@
       --subnet-ids {{ private_subnet_ids | join(' ') }} \
       --tags Key=Name,Value="{{ cf_db_config.db_subnet_group.name }}" Key=Environment,Value="{{ cf_db_config.common_tags.Environment }}" Key=Project,Value="{{ cf_db_config.common_tags.Project }}" Key=Component,Value="{{ cf_db_config.common_tags.Component }}" Key=ManagedBy,Value="{{ cf_db_config.common_tags.ManagedBy }}"
   register: subnet_group_result
-  failed_when: 
+  failed_when:
     - subnet_group_result.rc != 0
     - "'DBSubnetGroupAlreadyExists' not in subnet_group_result.stderr"
   environment:
@@ -135,7 +135,7 @@
       {% if cf_db_config.database.deletion_protection | default(false) %}--deletion-protection{% else %}--no-deletion-protection{% endif %} \
       --tags Key=Name,Value="{{ cf_db_config.database.cluster_name }}" Key=Environment,Value="{{ cf_db_config.common_tags.Environment }}" Key=Project,Value="{{ cf_db_config.common_tags.Project }}" Key=Component,Value="{{ cf_db_config.common_tags.Component }}" Key=ManagedBy,Value="{{ cf_db_config.common_tags.ManagedBy }}"
   register: aurora_cluster_result
-  failed_when: 
+  failed_when:
     - aurora_cluster_result.rc != 0
     - "'DBClusterAlreadyExistsFault' not in aurora_cluster_result.stderr"
   environment:
@@ -337,7 +337,7 @@
             },
             {
               "identifier": "{{ cf_db_config.database.instances[1].identifier }}",
-              "role": "reader", 
+              "role": "reader",
               "instance_class": "{{ cf_db_config.database.instances[1].instance_class }}",
               "availability_zone": "{{ cf_db_config.database.instances[1].az }}"
             }

@@ -1,13 +1,13 @@
 ---
 # Task 2: Request user to enter ROSA auth token, perform login and validate token
-# 
+#
 # Instructions to acquire ROSA auth token:
 # 1. Visit https://console.redhat.com/openshift/token/rosa
 # 2. Log in with your Red Hat account credentials
 # 3. Click "Load token" or "Copy token" button
 # 4. Copy the token string that appears
 # 5. Paste it when prompted by this playbook
-# 
+#
 # Alternative method:
 # 1. Go to https://cloud.redhat.com/openshift/token
 # 2. Select "ROSA" from the dropdown

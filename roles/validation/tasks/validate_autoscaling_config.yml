@@ -26,6 +26,6 @@
 - name: "Log autoscaling disabled"
   debug:
     msg: "✅ Autoscaling is disabled for this configuration"
-  when: 
+  when:
     - not (enable_autoscaling | default(false))
     - enable_debug_logging | default(false)

@@ -32,12 +32,12 @@
 - name: Confirm cleanup execution
   pause:
     prompt: |
-      
+
       ⚠️  DANGER ZONE ⚠️
-      
+
       You are about to PERMANENTLY DELETE all Aurora database resources!
       This action CANNOT be undone and will result in DATA LOSS.
-      
+
       Type 'DELETE' (in capitals) to confirm destruction, or press Ctrl+C to cancel
   register: cleanup_confirmation
   when: cf_db_cleanup_confirmation is not defined
@@ -47,7 +47,7 @@
 - name: Validate cleanup confirmation
   fail:
     msg: "Cleanup cancelled - confirmation not provided or incorrect"
-  when: 
+  when:
     - cf_db_cleanup_confirmation is not defined
     - cleanup_confirmation.user_input != "DELETE"
   tags:
@@ -89,7 +89,7 @@
       loop: "{{ cf_instances_found.stdout.split() }}"
       register: delete_instances_results
       failed_when: false
-      when: 
+      when:
         - cf_instances_found.stdout != "NOT_FOUND"
         - cf_instances_found.stdout != ""
         - cf_instances_found.stdout != "None"
@@ -106,7 +106,7 @@
       retries: 30
       delay: 30
       failed_when: false
-      when: 
+      when:
         - cf_instances_found.stdout != "NOT_FOUND"
         - cf_instances_found.stdout != ""
         - cf_instances_found.stdout != "None"
@@ -135,7 +135,7 @@
       loop: "{{ cf_clusters_found.stdout.split() }}"
       register: delete_cluster_results
       failed_when: false
-      when: 
+      when:
         - cf_clusters_found.stdout != "NOT_FOUND"
         - cf_clusters_found.stdout != ""
         - cf_clusters_found.stdout != "None"
@@ -152,7 +152,7 @@
       retries: 30
       delay: 30
       failed_when: false
-      when: 
+      when:
         - cf_clusters_found.stdout != "NOT_FOUND"
         - cf_clusters_found.stdout != ""
         - cf_clusters_found.stdout != "None"
@@ -179,7 +179,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_subnet_groups_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_subnet_groups_found.stdout != "NOT_FOUND"
         - cf_subnet_groups_found.stdout != ""
         - cf_subnet_groups_found.stdout != "None"
@@ -216,7 +216,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_vpc_peering_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_vpc_peering_found.stdout != "NOT_FOUND"
         - cf_vpc_peering_found.stdout != ""
         - cf_vpc_peering_found.stdout != "None"
@@ -253,7 +253,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_security_groups_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_security_groups_found.stdout != "NOT_FOUND"
         - cf_security_groups_found.stdout != ""
         - cf_security_groups_found.stdout != "None"
@@ -265,7 +265,7 @@
     - cleanup-security-groups
 
 # Phase 3a: Delete Public Subnets
-- name: Phase 3a - Delete Public Subnets  
+- name: Phase 3a - Delete Public Subnets
   block:
     - name: Find public subnets with cf tags
       shell: |
@@ -290,7 +290,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_public_subnets_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_public_subnets_found.stdout != "NOT_FOUND"
         - cf_public_subnets_found.stdout != ""
         - cf_public_subnets_found.stdout != "None"
@@ -330,7 +330,7 @@
       loop: "{{ cf_nat_gateways_found.stdout.split() }}"
       register: cf_nat_eip_allocations
       failed_when: false
-      when: 
+      when:
         - cf_nat_gateways_found.stdout != "NOT_FOUND"
         - cf_nat_gateways_found.stdout != ""
         - cf_nat_gateways_found.stdout != "None"
@@ -344,7 +344,7 @@
       loop: "{{ cf_nat_gateways_found.stdout.split() }}"
       register: nat_delete_results
       failed_when: false
-      when: 
+      when:
         - cf_nat_gateways_found.stdout != "NOT_FOUND"
         - cf_nat_gateways_found.stdout != ""
         - cf_nat_gateways_found.stdout != "None"
@@ -363,7 +363,7 @@
       retries: 20
       delay: 30
       failed_when: false
-      when: 
+      when:
         - cf_nat_gateways_found.stdout != "NOT_FOUND"
         - cf_nat_gateways_found.stdout != ""
         - cf_nat_gateways_found.stdout != "None"
@@ -376,7 +376,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_nat_eip_allocations.results | default([]) }}"
       failed_when: false
-      when: 
+      when:
         - cf_nat_eip_allocations is defined
         - item.stdout is defined
         - item.stdout != "NOT_FOUND"
@@ -415,7 +415,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_private_subnets_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_private_subnets_found.stdout != "NOT_FOUND"
         - cf_private_subnets_found.stdout != ""
         - cf_private_subnets_found.stdout != "None"
@@ -452,7 +452,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_route_tables_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_route_tables_found.stdout != "NOT_FOUND"
         - cf_route_tables_found.stdout != ""
         - cf_route_tables_found.stdout != "None"
@@ -492,7 +492,7 @@
       loop: "{{ cf_igws_found.stdout.split() }}"
       register: cf_igw_vpc_attachments
       failed_when: false
-      when: 
+      when:
         - cf_igws_found.stdout != "NOT_FOUND"
         - cf_igws_found.stdout != ""
         - cf_igws_found.stdout != "None"
@@ -520,7 +520,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_unattached_eips_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_unattached_eips_found.stdout != "NOT_FOUND"
         - cf_unattached_eips_found.stdout != ""
         - cf_unattached_eips_found.stdout != "None"
@@ -534,7 +534,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_igw_vpc_attachments.results | default([]) }}"
       failed_when: false
-      when: 
+      when:
         - cf_igw_vpc_attachments is defined
         - item.stdout is defined
         - item.stdout != "NOT_FOUND"
@@ -549,7 +549,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_igws_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_igws_found.stdout != "NOT_FOUND"
         - cf_igws_found.stdout != ""
         - cf_igws_found.stdout != "None"
@@ -586,7 +586,7 @@
           --profile {{ cf_db_config.profile }}
       loop: "{{ cf_vpcs_found.stdout.split() }}"
       failed_when: false
-      when: 
+      when:
         - cf_vpcs_found.stdout != "NOT_FOUND"
         - cf_vpcs_found.stdout != ""
         - cf_vpcs_found.stdout != "None"

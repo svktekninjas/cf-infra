@@ -88,7 +88,7 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
-        args: [--max-line-length=120, --ignore=E203,W503]
+        args: [--max-line-length=120, --ignore=E203, W503]
         files: \.py$
 
   # Security Checks
@@ -125,22 +125,30 @@ repos:
     hooks:
       - id: check-ansible-vault
         name: Check for unencrypted vault files
-        entry: bash -c 'for f in $(find . -name "vault*.yml" -o -name "*vault.yml"); do if ! head -1 "$f" | grep -q "ANSIBLE_VAULT"; then echo "Unencrypted vault file: $f"; exit 1; fi; done'
+        entry: |
+          bash -c 'for f in $(find . -name "vault*.yml" -o -name "*vault.yml"); do
+            if ! head -1 "$f" | grep -q "ANSIBLE_VAULT"; then
+              echo "Unencrypted vault file: $f"; exit 1
+            fi
+          done'
         language: system
         pass_filenames: false
-        
+
       - id: check-reserved-vars
         name: Check for reserved variable names
-        entry: bash -c 'if grep -r "^\s*environment:" --include="*.yml" roles/ playbooks/ 2>/dev/null | grep -v "#"; then echo "Found reserved variable name: environment"; exit 1; fi'
+        entry: |
+          bash -c 'if grep -r "^\s*environment:" --include="*.yml" \
+            roles/ playbooks/ 2>/dev/null | grep -v "#"; then \
+            echo "Found reserved variable name: environment"; exit 1; fi'
         language: system
         pass_filenames: false
-        
+
       - id: validate-inventory
         name: Validate inventory structure
         entry: bash -c 'if [ -f ansible/inventory ]; then ansible-inventory -i ansible/inventory --list > /dev/null || exit 1; fi'
         language: system
         pass_filenames: false
-        
+
       - id: check-hardcoded-secrets
         name: Check for hardcoded secrets
         entry: bash -c 'if grep -rE "(api_key|password|token|secret):\s*['\''\"]\w+['\''\""]" --include="*.yml" --include="*.yaml" roles/ playbooks/ 2>/dev/null | grep -v -E "(vault_|lookup|env|prompt)"; then echo "Found potential hardcoded secrets"; exit 1; fi'

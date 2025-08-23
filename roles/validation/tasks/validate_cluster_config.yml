@@ -28,7 +28,7 @@
 
 - name: "Log cluster configuration validation result"
   debug:
-    msg: 
+    msg:
       - "✅ Cluster configuration validation passed:"
       - "  - Cluster name: {{ full_cluster_name }}"
       - "  - OpenShift version: {{ openshift_version }}"

@@ -240,7 +240,7 @@
       --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=cf-db-nat-eip-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
       --query 'AllocationId' \
       --output text)
-    
+
     # Create NAT Gateway
     NAT_GW=$(aws ec2 create-nat-gateway \
       --region {{ cf_db_config.region }} \
@@ -249,7 +249,7 @@
       --tag-specifications 'ResourceType=natgateway,Tags=[{Key=Name,Value=cf-db-nat-gateway-{{ cf_db_config.common_tags.Environment }}},{Key=Component,Value=cf-db},{Key=Environment,Value={{ cf_db_config.common_tags.Environment }}},{Key=Project,Value={{ cf_db_config.common_tags.Project }}},{Key=ManagedBy,Value={{ cf_db_config.common_tags.ManagedBy }}}]' \
       --query 'NatGateway.NatGatewayId' \
       --output text)
-    
+
     echo "$NAT_GW	$EIP_ALLOC"
   register: new_nat_gateway_result
   when: existing_nat_gateway_check.stdout == "None" or existing_nat_gateway_check.stdout == ""
@@ -283,8 +283,8 @@
       --nat-gateway-ids {{ cf_db_nat_gateway_id }}
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
-  when: 
-    - new_nat_gateway_result is defined 
+  when:
+    - new_nat_gateway_result is defined
     - new_nat_gateway_result is not skipped
     - new_nat_gateway_result.stdout is defined
     - new_nat_gateway_result.stdout != ""
@@ -408,7 +408,7 @@
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
   register: rosa_vpc_cidr_discovery
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(false)
     - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
   failed_when: false
@@ -427,7 +427,7 @@
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
   register: rosa_route_table_discovery
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(false)
     - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
   failed_when: false
@@ -439,9 +439,9 @@
 - name: Set discovered ROSA facts
   set_fact:
     rosa_vpc_id: "{{ rosa_vpc_discovery.stdout }}"
-    rosa_vpc_cidr: "{{ rosa_vpc_cidr_discovery.stdout }}"  
+    rosa_vpc_cidr: "{{ rosa_vpc_cidr_discovery.stdout }}"
     rosa_route_table_id: "{{ rosa_route_table_discovery.stdout }}"
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(false)
     - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
   tags:
@@ -506,7 +506,7 @@
       --query 'VpcPeeringConnection.VpcPeeringConnectionId' \
       --output text
   register: new_peering_result
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(false)
     - existing_peering_check.stdout == "None" or existing_peering_check.stdout == ""
   environment:
@@ -559,7 +559,7 @@
     aws ec2 accept-vpc-peering-connection \
       --region us-east-1 \
       --vpc-peering-connection-id {{ cf_db_peering_connection_id }}
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(false)
     - peering_status_check.stdout is defined
     - peering_status_check.stdout == "pending-acceptance"
@@ -576,7 +576,7 @@
     aws ec2 wait vpc-peering-connection-exists \
       --region {{ cf_db_config.region }} \
       --vpc-peering-connection-ids {{ cf_db_peering_connection_id }}
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(false)
     - cf_db_peering_connection_id is defined
     - cf_db_peering_connection_id != ""

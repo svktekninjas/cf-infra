@@ -2,15 +2,15 @@
   hosts: localhost
   connection: local
   gather_facts: yes
-  
+
   vars_files:
     - "../environments/{{ target_environment | default('dev') }}/{{ target_environment | default('dev') }}.yml"
-  
+
   pre_tasks:
     - name: Display playbook start
       debug:
         msg: "Starting ROSA infrastructure setup process for {{ target_environment | default('dev') }} environment"
-  
+
   roles:
     - role: aws-setup
       tags: ['aws', 'setup']
@@ -28,7 +28,7 @@
       tags: ['cf-db', 'database', 'aurora', 'postgresql']
 #    - role: cf-deployment
 #      tags: ['cf-deployment', 'microservices', 'deployment']
-  
+
   post_tasks:
     - name: Display playbook completion
       debug:

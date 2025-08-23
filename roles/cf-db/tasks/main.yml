@@ -97,7 +97,7 @@
       - "📋 Next Steps:"
       - "   1. Test connectivity from ROSA cluster"
       - "   2. Create OpenShift database secrets"
-      - "   3. Configure application connection strings" 
+      - "   3. Configure application connection strings"
       - "   4. Set up database monitoring (optional)"
       - ""
       - "🏷️  All resources tagged with Component=cf-db"

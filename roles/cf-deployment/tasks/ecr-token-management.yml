@@ -156,57 +156,57 @@
             serviceAccount: "{{ ecr_token_config.service_account_name }}"
             securityContext: {}
             containers:
-            - name: ecr-sync
-              image: "{{ ecr_token_config.base_image }}"
-              imagePullPolicy: Always
-              command:
-                - /bin/sh
-                - -ce
-                - |-
-                  # Install kubectl
-                  curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-                  chmod +x kubectl
-                  mv kubectl /usr/local/bin/
+              - name: ecr-sync
+                image: "{{ ecr_token_config.base_image }}"
+                imagePullPolicy: Always
+                command:
+                  - /bin/sh
+                  - -ce
+                  - |-
+                    # Install kubectl
+                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    chmod +x kubectl
+                    mv kubectl /usr/local/bin/
 
-                  while true; do
-                    CURRENT_TIME=$(TZ="{{ ecr_token_config.timezone }}" date "+%Y-%m-%d %H:%M:%S")
-                    # ECR Initialization
-                    aws ecr get-login-password --region ${REGION} > /token/ecr-token
+                    while true; do
+                      CURRENT_TIME=$(TZ="{{ ecr_token_config.timezone }}" date "+%Y-%m-%d %H:%M:%S")
+                      # ECR Initialization
+                      aws ecr get-login-password --region ${REGION} > /token/ecr-token
 
-                    # Command for create-secret
-                    kubectl create secret docker-registry {{ ecr_token_config.secret_name }} \
-                      --dry-run=client \
-                      --docker-server="{{ ecr_token_config.ecr_registry }}" \
-                      --docker-username=AWS \
-                      --docker-password="$(cat /token/ecr-token)" \
-                      -o yaml | kubectl apply -f -
+                      # Command for create-secret
+                      kubectl create secret docker-registry {{ ecr_token_config.secret_name }} \
+                        --dry-run=client \
+                        --docker-server="{{ ecr_token_config.ecr_registry }}" \
+                        --docker-username=AWS \
+                        --docker-password="$(cat /token/ecr-token)" \
+                        -o yaml | kubectl apply -f -
 
-                    echo "Successfully Secret Created at [$CURRENT_TIME]"
+                      echo "Successfully Secret Created at [$CURRENT_TIME]"
 
-                    # Additional commands for create-secret if needed
+                      # Additional commands for create-secret if needed
 
-                    sleep {{ ecr_token_config.refresh_interval_hours }}h
-                  done
-              env:
-                - name: REGION
-                  value: "{{ ecr_token_config.aws_region }}"
-              resources:
-                limits:
-                  cpu: "{{ ecr_token_config.resources.limits.cpu }}"
-                  memory: "{{ ecr_token_config.resources.limits.memory }}"
-                requests:
-                  cpu: "{{ ecr_token_config.resources.requests.cpu }}"
-                  memory: "{{ ecr_token_config.resources.requests.memory }}"
-              securityContext:
-                allowPrivilegeEscalation: false
-                runAsNonRoot: true
-                seccompProfile:
-                  type: RuntimeDefault
-              terminationMessagePath: /dev/termination-log
-              terminationMessagePolicy: File
-              volumeMounts:
-                - mountPath: /token
-                  name: token
+                      sleep {{ ecr_token_config.refresh_interval_hours }}h
+                    done
+                env:
+                  - name: REGION
+                    value: "{{ ecr_token_config.aws_region }}"
+                resources:
+                  limits:
+                    cpu: "{{ ecr_token_config.resources.limits.cpu }}"
+                    memory: "{{ ecr_token_config.resources.limits.memory }}"
+                  requests:
+                    cpu: "{{ ecr_token_config.resources.requests.cpu }}"
+                    memory: "{{ ecr_token_config.resources.requests.memory }}"
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  runAsNonRoot: true
+                  seccompProfile:
+                    type: RuntimeDefault
+                terminationMessagePath: /dev/termination-log
+                terminationMessagePolicy: File
+                volumeMounts:
+                  - mountPath: /token
+                    name: token
             volumes:
               - name: token
                 emptyDir:

@@ -1,3 +1,4 @@
+---
 galaxy_info:
   author: DevOps Team
   description: AWS CLI setup and configuration validation role
@@ -28,4 +29,3 @@ galaxy_info:
     - validation
 
 dependencies: []
-

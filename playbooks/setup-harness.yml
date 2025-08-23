@@ -9,7 +9,7 @@
     - "../environments/{{ env | default('dev') }}/vault.yml"
   vars:
     target_environment: "{{ env | default('dev') }}"
-    
+
   pre_tasks:
     - name: Display execution information
       debug:
@@ -41,20 +41,20 @@
           ========================================
           Harness Setup Completed Successfully!
           ========================================
-          
+
           What was configured:
           ✓ Harness CLI installed and configured
           ✓ Service accounts created with IRSA
           ✓ Harness Delegate deployed
           ✓ Connectors created (GitHub, AWS ECR, ROSA)
           ✓ Resources applied (services, environments)
-          
+
           Next Steps:
           1. Log into Harness: https://app.harness.io
           2. Verify delegate is connected
           3. Test connectors
           4. Execute your first pipeline
-          
+
           Useful Commands:
           - Check delegate: oc get pods -n harness-delegate-ng
           - View logs: oc logs -n harness-delegate-ng -l app=harness-delegate
@@ -69,21 +69,21 @@
           =====================
           Date: {{ ansible_date_time.iso8601 }}
           Environment: {{ environment }}
-          
+
           Components Installed:
           - Harness CLI Version: {{ harness_cli_version | default('latest') }}
           - Delegate Name: {{ harness_delegate_name }}
           - Delegate Namespace: {{ harness_delegate_namespace }}
-          
+
           Service Accounts:
           - ECR SA: {{ harness_deployer_sa_name }} in {{ harness_deployer_namespaces | join(', ') }}
           - Delegate SA: {{ harness_delegate_sa_name }} in {{ harness_delegate_namespace }}
-          
+
           Connectors:
           - GitHub: {{ connector_github_id }}
           - AWS ECR: {{ connector_aws_ecr_id }}
           - ROSA Cluster: {{ connector_rosa_cluster_id }}
-          
+
           Configuration:
           - Organization: {{ harness_org_id }}
           - Project: {{ harness_project_id }}

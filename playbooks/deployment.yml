@@ -2,45 +2,45 @@
   hosts: localhost
   connection: local
   gather_facts: yes
-  
+
   vars_files:
     - "../environments/{{ target_environment | default('dev') }}/{{ target_environment | default('dev') }}.yml"
-  
+
   pre_tasks:
     - name: Display deployment start
       debug:
         msg: "Starting application deployment for {{ target_environment | default('dev') }} environment"
-    
+
     - name: Verify cluster is ready
       shell: rosa describe cluster -c {{ cluster_name_prefix }}-{{ target_environment }} --output json
       environment:
         AWS_PROFILE: "{{ aws_profile | default('default') }}"
       register: cluster_status
-      failed_when: 
+      failed_when:
         - cluster_status.rc != 0
       changed_when: false
-    
+
     - name: Check cluster state
       assert:
         that:
           - (cluster_status.stdout | from_json).state == "ready"
         fail_msg: "Cluster must be in 'ready' state before deployment. Current state: {{ (cluster_status.stdout | from_json).state | default('unknown') }}"
         success_msg: "Cluster is ready for deployment"
-  
+
   roles:
     - role: monitoring
       tags: ['monitoring', 'observability']
-      
-    - role: routes  
+
+    - role: routes
       tags: ['routes', 'networking', 'ingress']
-      
+
     - role: cf-deployment
       tags: ['cf-deployment', 'microservices', 'deployment', 'apps']
-  
+
   post_tasks:
     - name: Display deployment completion
       debug:
-        msg: 
+        msg:
           - "✅ Application deployment completed successfully!"
           - "Environment: {{ target_environment }}"
           - "Cluster: {{ cluster_name_prefix }}-{{ target_environment }}"

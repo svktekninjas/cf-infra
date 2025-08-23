@@ -39,7 +39,7 @@
   shell: |
     # Get all operator roles for the cluster
     OPERATOR_ROLES=$(aws iam list-roles --query "Roles[?contains(RoleName, '{{ full_cluster_name }}')].RoleName" --output text)
-    
+
     if [ -n "$OPERATOR_ROLES" ]; then
       for role in $OPERATOR_ROLES; do
         echo "Tagging operator IAM role: $role"
@@ -52,7 +52,7 @@
     fi
   environment:
     AWS_PROFILE: "{{ aws_profile | default('default') }}"
-  when: 
+  when:
     - resource_tags is defined
     - operator_roles_result is defined
     - operator_roles_result.changed
@@ -81,7 +81,7 @@
   register: admin_user_result
   environment:
     AWS_PROFILE: "{{ aws_profile | default('default') }}"
-  when: 
+  when:
     - create_admin_user | default(true)
     - admin_exists_check.stdout == "not-exists"
   tags:
@@ -104,9 +104,9 @@
   set_fact:
     admin_username: "{{ admin_user_result.stdout | regex_search('--username ([^ ]+)', '\\1') | first | default('cluster-admin') }}"
     admin_password: "{{ admin_user_result.stdout | regex_search('--password ([^ ]+)', '\\1') | first | default('') }}"
-  when: 
+  when:
     - create_admin_user | default(true)
-    - admin_user_result is defined 
+    - admin_user_result is defined
     - admin_user_result.changed
     - admin_exists_check.stdout == "not-exists"
   tags:
@@ -122,7 +122,7 @@
       - "  - Login URL: {{ cluster_console_url | default('Check cluster status for URL') }}"
       - ""
       - "⚠️  IMPORTANT: Save these credentials securely!"
-  when: 
+  when:
     - create_admin_user | default(true)
     - admin_username is defined
     - admin_password is defined
@@ -136,7 +136,7 @@
       --user {{ dedicated_admin_user }} \
       --cluster {{ full_cluster_name }}
   register: dedicated_admin_result
-  when: 
+  when:
     - dedicated_admin_user is defined
     - dedicated_admin_user != ""
   tags:
@@ -150,8 +150,8 @@
       - "✅ Dedicated admin access granted:"
       - "  - User: {{ dedicated_admin_user }}"
       - "  - Cluster: {{ full_cluster_name }}"
-  when: 
-    - dedicated_admin_result is defined 
+  when:
+    - dedicated_admin_result is defined
     - dedicated_admin_result.changed
   tags:
     - cluster
@@ -173,7 +173,7 @@
       --hosted-domain {{ identity_provider.hosted_domain }}
       {% endif %}
   register: idp_creation_result
-  when: 
+  when:
     - identity_provider is defined
     - identity_provider.enabled | default(false)
   tags:
@@ -188,8 +188,8 @@
       - "  - Type: {{ identity_provider.type }}"
       - "  - Name: {{ identity_provider.name }}"
       - "  - Cluster: {{ full_cluster_name }}"
-  when: 
-    - idp_creation_result is defined 
+  when:
+    - idp_creation_result is defined
     - idp_creation_result.changed
   tags:
     - cluster

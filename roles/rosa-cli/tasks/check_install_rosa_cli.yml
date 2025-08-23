@@ -42,7 +42,7 @@
   set_fact:
     rosa_needs_update: true
   when: >
-    rosa_cli_check.rc != 0 or 
+    rosa_cli_check.rc != 0 or
     (rosa_cli_version != "latest" and rosa_current_version.stdout is defined and
      rosa_latest_version is defined and rosa_latest_version not in rosa_current_version.stdout)
   tags: rosa

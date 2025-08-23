@@ -6,15 +6,15 @@
   hosts: localhost
   connection: local
   gather_facts: yes
-  
+
   vars_files:
     - "../environments/{{ target_environment | default('dev') }}/{{ target_environment | default('dev') }}.yml"
     - "../environments/{{ target_environment | default('dev') }}/cf-deployment.yml"
-  
+
   pre_tasks:
     - name: Display deployment start
       debug:
-        msg: 
+        msg:
           - "Starting CF deployment for {{ target_environment | default('dev') }} environment"
           - "Harness delegate enabled: {{ harness_delegate_enabled | default(true) }}"
       tags:
@@ -22,13 +22,13 @@
 
   roles:
     - role: cf-deployment
-      tags: 
+      tags:
         - cf-deployment
         - microservices
         - deployment
         - harness-delegate
         - harness
-  
+
   post_tasks:
     - name: Display deployment completion
       debug:

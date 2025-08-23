@@ -1,0 +1,179 @@
+# MAKEFILE TUTORIAL - Core Concepts Demonstration
+# Run: make -f Makefile.tutorial <target>
+
+# ============================================================
+# PART 1: VARIABLES
+# ============================================================
+
+# Immediate assignment (:=) - evaluated once when Makefile is read
+CURRENT_TIME := $(shell date +%H:%M:%S)
+# Recursive assignment (=) - evaluated each time it's used  
+LIVE_TIME = $(shell date +%H:%M:%S)
+# Conditional assignment (?=) - only sets if not already defined
+DEFAULT_USER ?= anonymous
+# Append (+=) - adds to existing variable
+PATH_DIRS := /usr/bin
+PATH_DIRS += /usr/local/bin
+
+# ============================================================
+# PART 2: BASIC TARGETS
+# ============================================================
+
+.PHONY: demo-variables
+demo-variables: ## Demonstrate variable types
+	@echo "=== VARIABLE TYPES DEMO ==="
+	@echo "CURRENT_TIME (set once): $(CURRENT_TIME)"
+	@sleep 2
+	@echo "CURRENT_TIME (same): $(CURRENT_TIME)"
+	@echo "LIVE_TIME (evaluated each time): $(LIVE_TIME)"
+	@sleep 2
+	@echo "LIVE_TIME (updated): $(LIVE_TIME)"
+	@echo "DEFAULT_USER: $(DEFAULT_USER)"
+	@echo "PATH_DIRS: $(PATH_DIRS)"
+
+# ============================================================
+# PART 3: DEPENDENCIES & ORDER
+# ============================================================
+
+.PHONY: step1 step2 step3 final
+step1:
+	@echo "[1] First step executed"
+	@touch .step1_done
+
+step2: step1  # step2 depends on step1
+	@echo "[2] Second step (runs after step1)"
+	@touch .step2_done
+
+step3: step1  # step3 also depends on step1 (but not step2)
+	@echo "[3] Third step (runs after step1, parallel to step2)"
+	@touch .step3_done
+
+final: step2 step3  # final needs both step2 and step3
+	@echo "[4] Final step (after step2 AND step3)"
+	@rm -f .step*_done
+
+# ============================================================
+# PART 4: SPECIAL VARIABLES
+# ============================================================
+
+.PHONY: special-vars
+special-vars: dependency1 dependency2
+	@echo "=== SPECIAL VARIABLES ==="
+	@echo "Target name (\$$@): $@"
+	@echo "All dependencies (\$$^): $^"
+	@echo "First dependency (\$$<): $<"
+
+dependency1:
+	@echo "Creating dependency1"
+
+dependency2:
+	@echo "Creating dependency2"
+
+# ============================================================
+# PART 5: PATTERN RULES (Generic Rules)
+# ============================================================
+
+# Convert any .yml file to .json (pattern rule)
+%.json: %.yml
+	@echo "Converting $< to $@"
+	@echo '{"converted": "from $<"}' > $@
+
+# ============================================================
+# PART 6: FUNCTIONS
+# ============================================================
+
+# Define a reusable function
+define run_test
+	@echo "Testing: $(1)"
+	@echo "Parameters: $(2)"
+endef
+
+.PHONY: use-function
+use-function:
+	$(call run_test,MyTest,param1 param2)
+
+# ============================================================
+# PART 7: CONDITIONALS
+# ============================================================
+
+OS := $(shell uname)
+
+.PHONY: check-os
+check-os:
+ifeq ($(OS),Darwin)
+	@echo "Running on macOS"
+else ifeq ($(OS),Linux)
+	@echo "Running on Linux"
+else
+	@echo "Unknown OS: $(OS)"
+endif
+
+# ============================================================
+# PART 8: SHELL VARIABLES VS MAKE VARIABLES
+# ============================================================
+
+.PHONY: variable-scopes
+variable-scopes:
+	@echo "=== VARIABLE SCOPES ==="
+	@MAKE_VAR="I am a Make variable"; echo "Make var: $(MAKE_VAR)"  # WRONG - empty
+	@SHELL_VAR="I am a shell variable"; echo "Shell var: $$SHELL_VAR"  # CORRECT
+
+# ============================================================
+# PART 9: ERROR HANDLING
+# ============================================================
+
+.PHONY: error-handling
+error-handling:
+	-@echo "This command with - prefix continues even if it fails"
+	-@false  # This would normally stop execution
+	@echo "But we continue!"
+	@true || echo "Using || for error handling"
+	@false && echo "This won't print" || echo "But this will"
+
+# ============================================================
+# PART 10: PARALLEL EXECUTION
+# ============================================================
+
+.PHONY: parallel task-a task-b task-c
+task-a:
+	@echo "Task A starting..."
+	@sleep 2
+	@echo "Task A done!"
+
+task-b:
+	@echo "Task B starting..."
+	@sleep 2
+	@echo "Task B done!"
+
+task-c:
+	@echo "Task C starting..."
+	@sleep 2
+	@echo "Task C done!"
+
+parallel: task-a task-b task-c
+	@echo "All tasks complete!"
+# Run with: make -j3 parallel  (runs 3 tasks in parallel)
+
+# ============================================================
+# DEFAULT GOAL
+# ============================================================
+
+.DEFAULT_GOAL := help
+
+.PHONY: help
+help:
+	@echo "MAKEFILE TUTORIAL - Learn by Running!"
+	@echo ""
+	@echo "Try these commands:"
+	@echo "  make -f Makefile.tutorial demo-variables"
+	@echo "  make -f Makefile.tutorial final"
+	@echo "  make -f Makefile.tutorial special-vars"
+	@echo "  make -f Makefile.tutorial check-os"
+	@echo "  make -f Makefile.tutorial variable-scopes"
+	@echo "  make -f Makefile.tutorial error-handling"
+	@echo "  make -f Makefile.tutorial -j3 parallel"
+	@echo ""
+	@echo "Advanced:"
+	@echo "  make -f Makefile.tutorial -n final  # Dry run"
+	@echo "  make -f Makefile.tutorial -d final  # Debug mode"
+	@echo "  make -f Makefile.tutorial -j4 parallel  # 4 parallel jobs"

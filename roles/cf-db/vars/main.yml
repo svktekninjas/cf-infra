@@ -9,7 +9,7 @@ cf_db_supported_pg_versions:
   - "13.13"
   - "12.17"
 
-# Aurora MySQL Engine Versions  
+# Aurora MySQL Engine Versions
 cf_db_supported_mysql_versions:
   - "8.0.mysql_aurora.3.04.0"
   - "5.7.mysql_aurora.2.12.0"
@@ -21,7 +21,7 @@ cf_db_instance_classes:
     - "db.t4g.medium"
   test:
     - "db.t3.medium"
-    - "db.t4g.medium" 
+    - "db.t4g.medium"
     - "db.r6g.large"
   prod:
     - "db.r6g.large"
@@ -85,7 +85,7 @@ cf_db_cluster_parameters:
     log_statement: "all"
     log_min_duration_statement: 1000
     max_connections: 100
-  
+
 # Performance Insights Settings
 cf_db_performance_insights:
   enabled: true
@@ -140,12 +140,12 @@ cf_db_vpc_peering_config:
   route_propagation_wait: 60  # seconds
   status_check_retries: 30
   status_check_delay: 10  # seconds
-  
+
 # VPC Peering Route Priorities
 cf_db_vpc_peering_routes:
   priority: 100
   metric: 100
-  
+
 # VPC Peering Validation Rules
 cf_db_vpc_peering_validation:
   max_peering_connections_per_vpc: 50

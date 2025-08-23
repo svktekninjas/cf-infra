@@ -75,7 +75,7 @@
     AWS_PROFILE: "{{ aws_profile | default('default') }}"
   register: cluster_creation_result
   when: not (skip_cluster_creation | default(false))
-  failed_when: 
+  failed_when:
     - cluster_creation_result.rc != 0
     - "'Duplicate cluster name' not in cluster_creation_result.stderr"
   tags:
@@ -86,7 +86,7 @@
   set_fact:
     cluster_already_exists: true
     skip_cluster_creation: true
-  when: 
+  when:
     - cluster_creation_result is defined
     - cluster_creation_result is not skipped
     - cluster_creation_result.rc is defined
@@ -104,7 +104,7 @@
       - ""
       - "🔍 Check cluster status:"
       - "    rosa describe cluster -c {{ full_cluster_name }}"
-  when: 
+  when:
     - skip_cluster_creation | default(false)
     - not (cluster_already_exists | default(false))
   tags:
@@ -151,7 +151,7 @@
       - ""
       - "⏸️  To wait for cluster to be ready, run:"
       - "    ansible-playbook playbooks/main.yml --tags cluster-monitor -e 'target_environment={{ target_environment }}' -e 'wait_for_cluster_ready=true'"
-  when: 
+  when:
     - not (skip_cluster_creation | default(false))
     - cluster_creation_result is defined
     - cluster_creation_result is not skipped

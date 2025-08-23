@@ -89,7 +89,7 @@
       --port {{ cf_db_config.security_group.db_port }} \
       --cidr {{ item }}
   loop: "{{ cf_db_config.security_group.allowed_cidrs }}"
-  when: 
+  when:
     - existing_aurora_cidr_rules.stdout is defined
     - item not in existing_aurora_cidr_rules.stdout
   environment:
@@ -107,8 +107,8 @@
       --protocol tcp \
       --port {{ cf_db_config.security_group.db_port }} \
       --source-group {{ cf_db_config.openshift_sg_id }}
-  when: 
-    - cf_db_config.openshift_sg_id is defined 
+  when:
+    - cf_db_config.openshift_sg_id is defined
     - cf_db_config.openshift_sg_id != ""
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"

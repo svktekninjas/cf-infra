@@ -1,3 +1,4 @@
+---
 # Task 3: Environment setup and .env file updates
 
 - name: "Prompt for environment selection"
@@ -60,7 +61,7 @@
       AWS_PROFILE={{ aws_profile }}
       AWS_DEFAULT_REGION={{ aws_region | default('us-east-1') }}
       AWS_REGION={{ aws_region | default('us-east-1') }}
-      
+
       # Environment Configuration
       ENVIRONMENT={{ target_environment }}
       TERRAFORM_WORKSPACE={{ target_environment }}
@@ -88,13 +89,13 @@
   debug:
     msg: |
       Environment setup completed successfully!
-      
+
       Configuration:
       - Environment: {{ target_environment }}
       - Ansible environment path: {{ ansible_env_path }}
       - .env file updated: {{ ansible_env_path }}/.env
       - Export script created: {{ ansible_env_path }}/export_env.sh
-      
+
       To use the environment variables in your shell, run:
       source {{ ansible_env_path }}/export_env.sh
   tags: aws

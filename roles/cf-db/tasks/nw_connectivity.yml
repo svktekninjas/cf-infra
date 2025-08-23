@@ -110,7 +110,7 @@
       --query 'VpcPeeringConnection.VpcPeeringConnectionId' \
       --output text
   register: vpc_peering_connection_result
-  when: 
+  when:
     - cf_db_config.vpc_peering.enabled | default(true)
     - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
   environment:
@@ -134,7 +134,7 @@
       --vpc-peering-connection-id {{ vpc_peering_connection_id }}
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
-  when: 
+  when:
     - vpc_peering_connection_id is defined
     - cf_db_config.vpc_peering.auto_accept | default(true)
   tags:
@@ -151,7 +151,7 @@
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
   register: rosa_route_tables_discovery
-  when: 
+  when:
     - vpc_peering_connection_id is defined
     - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
   tags:
@@ -167,7 +167,7 @@
       --vpc-peering-connection-id {{ vpc_peering_connection_id }}
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
-  when: 
+  when:
     - vpc_peering_connection_id is defined
     - private_route_table_id is defined
     - discovered_rosa_vpc_cidr is defined
@@ -186,7 +186,7 @@
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
   loop: "{{ rosa_route_tables_discovery.stdout.split() if rosa_route_tables_discovery is defined and rosa_route_tables_discovery.stdout else [] }}"
-  when: 
+  when:
     - vpc_peering_connection_id is defined
     - rosa_route_tables_discovery is defined
     - aurora_vpc_cidr is defined

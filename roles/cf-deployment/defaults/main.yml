@@ -86,4 +86,3 @@ harness_delegate_cpu_request: "0.5"
 # ECR token management control flags
 deploy_ecr_token_management: false
 ecr_token_management_enabled: "{{ deploy_ecr_token_management | default(false) }}"
-

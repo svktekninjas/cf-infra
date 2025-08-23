@@ -80,7 +80,7 @@
         HARNESS_PLATFORM_URL: "{{ harness_platform_url }}"
       no_log: true
       register: harness_login
-      
+
     - name: Verify Harness CLI configuration
       command: harness account
       register: harness_account_info

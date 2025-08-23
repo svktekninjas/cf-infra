@@ -46,7 +46,7 @@
   environment:
     AWS_PROFILE: "{{ aws_profile | default('default') }}"
   register: cluster_status_check
-  until: 
+  until:
     - cluster_status_check.rc == 0
     - (cluster_status_check.stdout | from_json).state in ['ready', 'error']
   retries: "{{ cluster_creation_timeout_minutes | default(60) }}"
@@ -128,7 +128,7 @@
       - ""
       - "🔄 Resume monitoring with this playbook:"
       - "    ansible-playbook playbooks/main.yml --tags cluster-monitor -e 'target_environment={{ target_environment }}' -e 'cluster_creation_timeout_minutes=60'"
-  when: 
+  when:
     - cluster_state is defined
     - cluster_state not in ['ready', 'error']
   tags:

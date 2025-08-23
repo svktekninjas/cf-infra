@@ -90,12 +90,12 @@
   fail:
     msg: |
       ❌ ROSA service is not enabled in your AWS account.
-      
+
       Please visit https://console.aws.amazon.com/rosa/home to enable the service,
       then re-run this playbook.
-      
+
       This is a one-time setup requirement per AWS account.
-  when: 
+  when:
     - not rosa_service_enabled
     - strict_validation | default(true)
   tags:

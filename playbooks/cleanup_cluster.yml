@@ -1,7 +1,7 @@
 ---
 # ROSA Cluster Cleanup Playbook
 # This playbook safely removes a ROSA cluster and all associated resources
-# 
+#
 # Usage:
 #   ansible-playbook playbooks/cleanup_cluster.yml -e "target_environment=dev" -e "aws_profile=sid-KS"
 #   ansible-playbook playbooks/cleanup_cluster.yml -e "target_environment=dev" -e "aws_profile=sid-KS" -e "delete_cluster_vpc=true"
@@ -23,14 +23,14 @@
     cluster_cleanup: true
     delete_cluster_vpc: false  # Safety default - don't delete VPC unless explicitly requested
     aws_region: "{{ aws_region | default('us-east-1') }}"
-    
+
     # Handle both cluster_name and target_environment scenarios
     # If target_environment is provided, construct the full name
     # If cluster_name is provided directly, use it
     cluster_name_prefix: "rosa-cluster"  # Default prefix
     ansible_env_path: "{{ playbook_dir }}/../environments/{{ target_environment | default('dev') }}"
     full_cluster_name: "{% if cluster_name is defined %}{{ cluster_name }}{% elif target_environment is defined %}{{ cluster_name_prefix }}-{{ target_environment }}{% else %}rosa-cluster-dev{% endif %}"
-    
+
   pre_tasks:
     - name: Validate required variables
       assert:
@@ -41,13 +41,13 @@
           Missing required variables. Please provide:
           - aws_profile: AWS profile to use
           - target_environment: Environment (dev/test/prod) OR cluster_name: Specific cluster name
-          
+
           Example:
           ansible-playbook playbooks/cleanup_cluster.yml -e "target_environment=dev" -e "aws_profile=sid-KS"
         success_msg: "Variables validated. Proceeding with cleanup."
       tags:
         - always
-        
+
     - name: Load environment configuration if target_environment is provided
       include_vars: "{{ ansible_env_path }}/cluster-config.yml"
       when: target_environment is defined

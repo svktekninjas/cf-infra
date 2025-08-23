@@ -57,7 +57,7 @@
           - Name: {{ harness_delegate_name }}
           - Ready Replicas: {{ delegate_status.resources[0].status.readyReplicas | default(0) }}/{{ delegate_status.resources[0].status.replicas | default(0) }}
           - Pods Running: {{ delegate_pods.resources | length }}
-          
+
           Registered Delegates:
           {{ delegate_list.stdout | default('Unable to list delegates') }}
 
@@ -170,7 +170,7 @@
       ========================================
       Environment: {{ environment }}
       Timestamp: {{ ansible_date_time.iso8601 }}
-      
+
       Component Status:
       ✓ Harness CLI: Installed and Configured
       {{ '✓' if delegate_status.resources | length > 0 else '✗' }} Delegate: {{ harness_delegate_name }}
@@ -179,12 +179,12 @@
       {{ '✓' if connector_tests.results[2].rc == 0 else '✗' }} ROSA Cluster Connector
       ✓ Service Accounts: Created
       ✓ RBAC: Configured
-      
+
       Access Information:
       - Harness URL: {{ harness_platform_url }}
       - Project: {{ harness_project_id }}
       - Organization: {{ harness_org_id }}
-      
+
       Next Steps:
       1. Verify delegate is showing as connected in Harness UI
       2. Test pipeline execution with a sample deployment
