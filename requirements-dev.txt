@@ -1,0 +1,12 @@
+# Development and testing dependencies
+-r requirements.txt
+
+# Additional development tools
+ipython>=8.0.0
+ipdb>=0.13.0
+flake8>=6.0.0
+mypy>=1.0.0
+bandit>=1.7.0  # Security linter for Python
+safety>=2.3.0  # Check for known security vulnerabilities
+coverage>=7.0.0
+tox>=4.0.0

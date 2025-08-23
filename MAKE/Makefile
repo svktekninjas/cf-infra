@@ -4,7 +4,7 @@
 .PHONY: help install lint test clean fix validate all pre-commit setup
 
 # Variables
-PYTHON := python3
+PYTHON := /usr/local/bin/python3
 PIP := $(PYTHON) -m pip
 # Use ansible package version (not ansible-core version)
 ANSIBLE_VERSION := 11.5.0

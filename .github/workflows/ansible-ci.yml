@@ -4,18 +4,16 @@ on:
   push:
     branches: [ main, develop, feature/* ]
     paths:
-      - 'ansible/**'
       - 'playbooks/**'
       - 'roles/**'
-      - 'inventory/**'
+      - 'environments/**'
       - '.github/workflows/ansible-ci.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
-      - 'ansible/**'
       - 'playbooks/**'
       - 'roles/**'
-      - 'inventory/**'
+      - 'environments/**'
   workflow_dispatch:
     inputs:
       environment:
@@ -29,11 +27,11 @@ on:
           - prod
 
 env:
-  ANSIBLE_VERSION: "2.15.0"
+  ANSIBLE_VERSION: "11.5.0"  # This installs ansible with ansible-core 2.18.x
   PYTHON_VERSION: "3.11"
-  ANSIBLE_LINT_VERSION: "6.22.0"
-  YAMLLINT_VERSION: "1.33.0"
-  MOLECULE_VERSION: "6.0.2"
+  ANSIBLE_LINT_VERSION: "24.10.0"  # Updated to latest compatible version
+  YAMLLINT_VERSION: "1.35.1"
+  MOLECULE_VERSION: "24.10.0"  # Updated to latest version
 
 jobs:
   # Job 1: YAML Linting
@@ -246,7 +244,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy security scanner
-        uses: aquasecurity/trivy-action@v0.17.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -406,9 +404,9 @@ jobs:
       - name: Install Molecule
         run: |
           pip install --upgrade pip
+          pip install ansible==${{ env.ANSIBLE_VERSION }}
           pip install molecule==${{ env.MOLECULE_VERSION }}
           pip install molecule-plugins[docker]
-          pip install ansible==${{ env.ANSIBLE_VERSION }}
 
       - name: Create Molecule scenario
         run: |
