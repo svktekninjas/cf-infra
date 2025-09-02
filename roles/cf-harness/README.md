@@ -1,256 +1,224 @@
 # CF-Harness Ansible Role
 
-This Ansible role sets up Harness deployment infrastructure for the CF (ConsultingFirm) application on ROSA clusters.
+Enterprise-grade Ansible role for setting up Harness Platform integration with ROSA (Red Hat OpenShift Service on AWS) clusters for CF workload deployments.
 
 ## Overview
 
-The `cf-harness` role automates:
-- Harness CLI installation and configuration
-- Harness Delegate deployment on ROSA cluster
-- Connector setup (AWS, ECR, GitHub, Kubernetes)
-- Service account and RBAC configuration
-- Cross-account ECR integration with IRSA
+This role automates the complete setup of Harness Platform for deploying CF workloads (cf-monitor and cf-deploy) using Helm charts stored in Git repositories, with container images hosted in AWS ECR.
 
-## Prerequisites
+## Features
 
-1. **ROSA Cluster**: Active ROSA cluster with admin access
-2. **AWS Credentials**: Configured for cross-account ECR access
-3. **Harness Account**: Active Harness account with:
-   - Account ID
-   - API Key
-   - Delegate token
-4. **OpenShift CLI**: `oc` command available
-5. **Ansible**: Version 2.9+
+- **Delegate Management**: Deploys and configures Harness Delegate in ROSA cluster
+- **Connector Setup**: Configures Git, AWS, ECR, and Kubernetes connectors
+- **Environment Management**: Creates multi-environment setup (dev/staging/prod)
+- **Service Configuration**: Sets up Harness services with Helm chart integration
+- **Pipeline Automation**: Creates deployment pipelines with approval gates
+- **Trigger Configuration**: Sets up Git webhooks and scheduled triggers
+- **Security**: Implements secrets management and RBAC
+- **Monitoring**: Includes health checks and verification steps
 
-## Role Variables
+## Requirements
 
-### Required Variables
+### Software Dependencies
+- Ansible >= 2.9
+- kubectl
+- helm
+- Python kubernetes library
 
-```yaml
-# Harness Configuration
-harness_account_id: "YOUR_ACCOUNT_ID"
-harness_api_key: "YOUR_API_KEY"
-harness_delegate_token: "YOUR_DELEGATE_TOKEN"
-harness_org_id: "default"
-harness_project_id: "cf-deploy"
+### Access Requirements
+- Harness Platform account with API access
+- ROSA cluster with admin access
+- GitHub repositories with appropriate permissions
+- AWS ECR access
 
-# AWS Configuration
-aws_account_id_source: "818140567777"  # sidatks account
-aws_account_id_target: "606639739464"  # svktek account
-aws_region: "us-east-1"
-ecr_registry: "818140567777.dkr.ecr.us-east-1.amazonaws.com"
+## Role Structure
 
-# ROSA Cluster Configuration
-rosa_cluster_name: "cf-rosa-cluster"
-rosa_cluster_url: "https://api.YOUR_CLUSTER.openshiftapps.com:6443"
-rosa_oidc_provider: "oidc.op1.openshiftapps.com/YOUR_ID"
-
-# Environment
-environment: "dev"  # dev/test/prod
+```
+cf-harness/
+├── defaults/main.yml          # Default variables
+├── vars/main.yml             # Internal role variables
+├── tasks/
+│   ├── main.yml              # Main task orchestration
+│   ├── validate.yml          # Input validation
+│   ├── secrets.yml           # Secrets management
+│   ├── delegate.yml          # Delegate deployment
+│   ├── connectors.yml        # Connector configuration
+│   ├── environments.yml      # Environment setup
+│   ├── services.yml          # Service configuration
+│   ├── pipelines.yml         # Pipeline creation
+│   ├── triggers.yml          # Trigger setup
+│   └── verify.yml            # Verification tasks
+├── templates/
+│   └── verification_report.j2 # Verification report template
+├── meta/main.yml             # Role metadata
+└── README.md                 # This file
 ```
 
 ## Usage
 
-### 1. Basic Playbook
+### Basic Usage
+
+```bash
+# Run for development environment
+ansible-playbook -i localhost, harness-setup-playbook.yml -e env=dev
+
+# Run for test environment
+ansible-playbook -i localhost, harness-setup-playbook.yml -e env=test
+
+# Run for production environment
+ansible-playbook -i localhost, harness-setup-playbook.yml -e env=prod
+```
+
+### With Vault Encryption
+
+```bash
+# Encrypt secrets file
+ansible-vault encrypt vault/dev/secrets.yml
+
+# Run with vault password
+ansible-playbook -i localhost, harness-setup-playbook.yml -e env=dev --ask-vault-pass
+```
+
+### Tag-based Execution
+
+```bash
+# Only setup delegate
+ansible-playbook harness-setup-playbook.yml -e env=dev --tags delegate
+
+# Only setup connectors
+ansible-playbook harness-setup-playbook.yml -e env=dev --tags connectors
+
+# Only verify setup
+ansible-playbook harness-setup-playbook.yml -e env=dev --tags verification
+```
+
+## Configuration
+
+### Required Variables
+
+Create environment-specific variable files in `environments/{env}/harness-setup.yml`:
 
 ```yaml
-- hosts: localhost
-  gather_facts: yes
-  roles:
-    - role: cf-harness
-      vars:
-        harness_account_id: "{{ vault_harness_account_id }}"
-        harness_api_key: "{{ vault_harness_api_key }}"
-        harness_delegate_token: "{{ vault_harness_delegate_token }}"
-        environment: "dev"
+# Harness Configuration
+harness_account_id: "your_account_id"
+harness_org_id: "your_org_id"
+harness_api_token: "{{ vault_harness_api_token }}"
+
+# ROSA Configuration
+rosa_cluster_name: "your-rosa-cluster"
+
+# GitHub Configuration
+github_username: "{{ vault_github_username }}"
+github_token: "{{ vault_github_token }}"
 ```
 
-### 2. Run the Role
+### Vault Secrets
 
+Create encrypted secrets in `vault/{env}/secrets.yml`:
+
+```yaml
+vault_harness_api_token: "your_harness_api_token"
+vault_github_username: "your_github_username"
+vault_github_token: "your_github_token"
+```
+
+## Environment-Specific Configurations
+
+### Development
+- Single delegate replica
+- Minimal resource allocation
+- Basic monitoring
+- Development branch deployment
+
+### Test
+- Dual delegate replicas
+- Enhanced testing features
+- Staging environment included
+- Blue-green deployment strategy
+
+### Production
+- Triple delegate replicas
+- High availability setup
+- Comprehensive monitoring
+- Approval gates and compliance features
+- Canary deployment strategy
+
+## Outputs
+
+The role generates several output files:
+
+1. **Webhook URLs** (`/tmp/harness-webhook-urls.txt`): GitHub webhook configuration
+2. **Verification Report** (`/tmp/harness-verification-report.txt`): Setup verification results
+3. **Deployment Summary** (`/tmp/harness-deployment-summary.md`): Complete deployment summary
+
+## Post-Setup Tasks
+
+### 1. Configure GitHub Webhooks
+Use the webhook URLs from `/tmp/harness-webhook-urls.txt` to configure webhooks in your GitHub repositories.
+
+### 2. Test Pipeline Execution
+- Navigate to Harness UI
+- Execute pipelines manually
+- Verify deployments in ROSA cluster
+
+### 3. Monitor Delegate Health
 ```bash
-# Full setup
-ansible-playbook -i inventory playbooks/setup-harness.yml -e env=dev
+# Check delegate pods
+kubectl get pods -n harness-delegate-ng
 
-# Only CLI setup
-ansible-playbook -i inventory playbooks/setup-harness.yml -e env=dev --tags cli
-
-# Only delegate installation
-ansible-playbook -i inventory playbooks/setup-harness.yml -e env=dev --tags delegate
-
-# Only connectors
-ansible-playbook -i inventory playbooks/setup-harness.yml -e env=dev --tags connectors
+# View delegate logs
+kubectl logs -n harness-delegate-ng -l harness.io/name=cf-harness-delegate-{env}
 ```
 
-## Tasks Overview
+## Troubleshooting
 
-### 1. CLI Setup (`check_harness_cli.yml`)
-- Checks if Harness CLI is installed
-- Downloads and installs if missing
-- Configures authentication
+### Common Issues
 
-### 2. Validate Prerequisites (`validate_prerequisites.yml`)
-- Verifies OpenShift login
-- Checks AWS credentials
-- Validates Harness connectivity
+1. **Delegate Connection Issues**
+   - Check network connectivity
+   - Verify firewall rules
+   - Review delegate logs
 
-### 3. Service Account Setup (`setup_service_accounts.yml`)
-- Creates `harness-deployer` service account
-- Configures IRSA annotations for ECR access
-- Sets up RBAC permissions
+2. **ECR Authentication Failures**
+   - Verify AWS credentials
+   - Check ECR permissions
+   - Validate region settings
 
-### 4. Delegate Installation (`install_delegate.yml`)
-- Deploys Harness Delegate to cluster
-- Configures cross-account IAM role
-- Sets up network policies
+3. **Git Connector Issues**
+   - Confirm GitHub token permissions
+   - Verify repository access
+   - Check webhook configuration
 
-### 5. Connector Configuration (`setup_connectors.yml`)
-- Creates AWS connector for ECR
-- Sets up Kubernetes connector for ROSA
-- Configures GitHub connector
+### Debug Mode
 
-### 6. Apply Harness Resources (`apply_harness_resources.yml`)
-- Creates service definitions
-- Sets up pipelines
-- Configures environments
-
-## Directory Structure
-
-```
-cf-harness/
-├── README.md
-├── defaults/
-│   └── main.yml              # Default variables
-├── vars/
-│   └── main.yml              # Role variables
-├── tasks/
-│   ├── main.yml              # Main task orchestration
-│   ├── check_harness_cli.yml # CLI installation
-│   ├── validate_prerequisites.yml
-│   ├── setup_service_accounts.yml
-│   ├── install_delegate.yml
-│   ├── setup_connectors.yml
-│   └── apply_harness_resources.yml
-├── templates/
-│   ├── delegate-values.yaml.j2
-│   ├── harness-config.yaml.j2
-│   └── service-account.yaml.j2
-└── files/
-    └── install-harness-cli.sh
-```
-
-## Harness CLI Manual Setup
-
-If the automated setup fails, manually install Harness CLI:
-
-### macOS
+Run with increased verbosity:
 ```bash
-# Download latest version
-curl -LO https://github.com/harness/harness-cli/releases/latest/download/harness-Darwin-arm64
-# Or for Intel Macs:
-# curl -LO https://github.com/harness/harness-cli/releases/latest/download/harness-Darwin-x86_64
-
-# Make executable
-chmod +x harness-Darwin-*
-
-# Move to PATH
-sudo mv harness-Darwin-* /usr/local/bin/harness
-
-# Verify installation
-harness --version
-```
-
-### Linux
-```bash
-# Download latest version
-curl -LO https://github.com/harness/harness-cli/releases/latest/download/harness-Linux-x86_64
-
-# Make executable
-chmod +x harness-Linux-x86_64
-
-# Move to PATH
-sudo mv harness-Linux-x86_64 /usr/local/bin/harness
-
-# Verify installation
-harness --version
-```
-
-### Configure CLI
-```bash
-# Login to Harness
-harness login \
-  --api-key YOUR_API_KEY \
-  --account-id YOUR_ACCOUNT_ID
-
-# Verify configuration
-harness account
+ansible-playbook harness-setup-playbook.yml -e env=dev -vvv
 ```
 
 ## Security Considerations
 
-1. **Secrets Management**:
-   - Store sensitive data in Ansible Vault
-   - Never commit API keys or tokens
-   - Use environment variables for CI/CD
+- Use Ansible Vault for all sensitive data
+- Implement least-privilege access
+- Regularly rotate secrets
+- Enable audit logging
+- Review RBAC permissions
 
-2. **RBAC**:
-   - Delegate uses least privilege principle
-   - Service accounts scoped to namespace
-   - Cross-account roles with external ID
+## Contributing
 
-3. **Network Security**:
-   - Network policies restrict pod communication
-   - Delegate communicates only with Harness platform
-   - ECR access via VPC endpoints
-
-## Troubleshooting
-
-### CLI Issues
-```bash
-# Check CLI installation
-which harness
-
-# Verify API connectivity
-curl -H "x-api-key: YOUR_KEY" https://app.harness.io/gateway/api/users/current
-
-# Reset CLI configuration
-rm -rf ~/.harness/
-harness login --api-key YOUR_KEY --account-id YOUR_ACCOUNT
-```
-
-### Delegate Issues
-```bash
-# Check delegate pods
-oc get pods -n harness-delegate-ng
-
-# View delegate logs
-oc logs -n harness-delegate-ng deployment/harness-delegate
-
-# Verify delegate registration (Note: CLI doesn't support delegate list)
-# Check delegate status in OpenShift
-oc get pods -n harness-delegate-ng
-```
-
-### Connector Issues
-```bash
-# Note: The harness CLI v0.0.29 doesn't support test/list commands for connectors
-# You can verify connectors in the Harness UI or use the API:
-
-# Check connector via API
-curl -H "x-api-key: YOUR_KEY" \
-  "https://app.harness.io/gateway/ng/api/connectors/{connector-id}?accountId=YOUR_ACCOUNT"
-
-# List connectors via API
-curl -H "x-api-key: YOUR_KEY" \
-  "https://app.harness.io/gateway/ng/api/connectors?accountId=YOUR_ACCOUNT"
-```
+1. Follow Ansible best practices
+2. Update documentation for new features
+3. Test across all environments
+4. Maintain backward compatibility
 
 ## Support
 
-For issues or questions:
-1. Check Harness documentation: https://docs.harness.io
-2. Review role execution logs: `ansible-playbook -vvv`
-3. Contact Platform Team
+For issues and questions:
+- Check troubleshooting section
+- Review Harness documentation
+- Consult ROSA documentation
+- Check Ansible logs for detailed errors
 
 ## License
 
-Internal use only - ConsultingFirm Platform Team
+MIT License - see LICENSE file for details.

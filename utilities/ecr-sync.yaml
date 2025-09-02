@@ -1,0 +1,651 @@
+Name:                   apigateway-app
+Namespace:              cf-dev
+CreationTimestamp:      Thu, 31 Jul 2025 22:53:41 -0500
+Labels:                 app=apigateway-app
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 2
+                        meta.helm.sh/release-name: api-gateway
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=apigateway-app
+Replicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:       app=apigateway-app
+                version=1.0.0
+  Annotations:  kubectl.kubernetes.io/restartedAt: 2025-08-03T00:50:03-05:00
+  Containers:
+   apigateway-app:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/api-gateway-service:latest
+    Port:       8765/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      200m
+      memory:   256Mi
+    Liveness:   http-get http://:8765/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:  http-get http://:8765/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:
+      SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICE_BASE_URL:  http://apigateway-app:8765
+      SPRING_BOOT_ADMIN_CLIENT_URL:                        http://spring-boot-admin:8082
+      CORS_ALLOWED_ORIGINS:                                https://frontend-service-cf-dev.apps.o0r9m0f2v7l3b1c.55n4.p1.openshiftapps.com
+      CORS_ALLOWED_METHODS:                                GET,POST,PUT,DELETE,OPTIONS
+      CORS_ALLOWED_HEADERS:                                *
+      CORS_ALLOW_CREDENTIALS:                              true
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:               http://naming-server-new:8761/eureka
+      JAVA_OPTS:                                           -Dcors.allowed.origins=https://frontend-service-cf-dev.apps.o0r9m0f2v7l3b1c.55n4.p1.openshiftapps.com
+    Mounts:                                                <none>
+  Volumes:                                                 <none>
+  Node-Selectors:                                          <none>
+  Tolerations:                                             <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  apigateway-app-fbc66677b (0/0 replicas created)
+NewReplicaSet:   apigateway-app-6fc88778b5 (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   bench-profile-service
+Namespace:              cf-dev
+CreationTimestamp:      Tue, 29 Jul 2025 13:06:56 -0500
+Labels:                 app=bench-profile-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 3
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=bench-profile-service
+Replicas:               2 desired | 2 updated | 2 total | 0 available | 2 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:       app=bench-profile-service
+                version=1.0.0
+  Annotations:  kubectl.kubernetes.io/restartedAt: 2025-07-30T15:48:41-05:00
+  Containers:
+   bench-profile-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/bench-profiles-service:latest
+    Port:       8081/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      200m
+      memory:   256Mi
+    Liveness:   http-get http://:8081/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:  http-get http://:8081/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:
+      SERVER_PORT:                                         8081
+      SPRING_PROFILES_ACTIVE:                              openshift
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:               http://naming-server-new:8761/eureka
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS:                   true
+      EUREKA_INSTANCE_HOSTNAME:                            bench-profile-service
+      SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICE_BASE_URL:  http://bench-profile-service:8081
+      SPRING_BOOT_ADMIN_CLIENT_URL:                        http://spring-boot-admin:8082
+      SPRING_CLOUD_CONFIG_URI:                             http://spring-cloud-config-service:8888
+      SPRING_CLOUD_CONFIG_FAIL_FAST:                       false
+      EXCEL_PROCESSOR_URL:                                 http://excel-service:8083
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:           health,info,metrics
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:             always
+      LOGGING_LEVEL_ROOT:                                  INFO
+      SPRING_DATASOURCE_URL:                               jdbc:postgresql://cf-aurora-pg-cluster-dev.cluster-c5ouqg2i83zv.us-west-1.rds.amazonaws.com:5432/cfdb_dev
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME:                 org.postgresql.Driver
+      SPRING_DATASOURCE_USERNAME:                          cfadmin
+      SPRING_DATASOURCE_PASSWORD:                          svktekdbdev
+      SPRING_JPA_DATABASE_PLATFORM:                        org.hibernate.dialect.PostgreSQLDialect
+      SPRING_JPA_HIBERNATE_DDL_AUTO:                       update
+    Mounts:                                                <none>
+  Volumes:                                                 <none>
+  Node-Selectors:                                          <none>
+  Tolerations:                                             <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      False   MinimumReplicasUnavailable
+OldReplicaSets:  bench-profile-service-648c8cc748 (0/0 replicas created), bench-profile-service-86c8fd768c (0/0 replicas created)
+NewReplicaSet:   bench-profile-service-77659b4dc7 (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   daily-submissions-service
+Namespace:              cf-dev
+CreationTimestamp:      Wed, 30 Jul 2025 16:52:21 -0500
+Labels:                 app=daily-submissions-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 1
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=daily-submissions-service
+Replicas:               2 desired | 2 updated | 2 total | 0 available | 2 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  app=daily-submissions-service
+           version=1.0.0
+  Containers:
+   daily-submissions-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/daily-submissions-service:latest
+    Port:       8084/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      200m
+      memory:   256Mi
+    Liveness:   http-get http://:8084/actuator/health delay=180s timeout=5s period=30s #success=1 #failure=3
+    Readiness:  http-get http://:8084/actuator/health delay=180s timeout=5s period=10s #success=1 #failure=3
+    Environment:
+      SERVER_PORT:                                         8084
+      SPRING_PROFILES_ACTIVE:                              openshift
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:               http://naming-server-new:8761/eureka
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS:                   true
+      EUREKA_INSTANCE_HOSTNAME:                            daily-submissions-service
+      SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICE_BASE_URL:  http://daily-submissions-service:8084
+      SPRING_BOOT_ADMIN_CLIENT_URL:                        http://spring-boot-admin:8082
+      SPRING_CLOUD_CONFIG_URI:                             http://spring-cloud-config-service:8888
+      SPRING_CLOUD_CONFIG_FAIL_FAST:                       false
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:           health,info,metrics
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:             always
+      LOGGING_LEVEL_ROOT:                                  INFO
+      SPRING_DATASOURCE_URL:                               jdbc:postgresql://cf-aurora-pg-cluster-dev.cluster-c5ouqg2i83zv.us-west-1.rds.amazonaws.com:5432/cfdb_dev
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME:                 org.postgresql.Driver
+      SPRING_DATASOURCE_USERNAME:                          cfadmin
+      SPRING_DATASOURCE_PASSWORD:                          svktekdbdev
+      SPRING_JPA_DATABASE_PLATFORM:                        org.hibernate.dialect.PostgreSQLDialect
+      SPRING_JPA_HIBERNATE_DDL_AUTO:                       update
+    Mounts:                                                <none>
+  Volumes:                                                 <none>
+  Node-Selectors:                                          <none>
+  Tolerations:                                             <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      False   MinimumReplicasUnavailable
+OldReplicaSets:  <none>
+NewReplicaSet:   daily-submissions-service-fcd6d669f (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   ecr-credentials-sync
+Namespace:              cf-dev
+CreationTimestamp:      Sun, 27 Jul 2025 01:35:30 -0500
+Labels:                 app.kubernetes.io/component=apiComponent
+                        app.kubernetes.io/instance=apiservice
+                        app.kubernetes.io/name=ecr-credentials-sync
+                        app.kubernetes.io/version=1.0
+Annotations:            app.kubernetes.io/owner: consultingFirm
+                        app.kubernetes.io/version: 1.0
+                        deployment.kubernetes.io/revision: 1
+Selector:               app=ecr-credentials-sync
+Replicas:               1 desired | 0 updated | 0 total | 0 available | 1 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:           app=ecr-credentials-sync
+                    app.kubernetes.io/component=apiComponent
+                    app.kubernetes.io/instance=apiservice
+                    app.kubernetes.io/name=ecr-credentials-sync
+                    app.kubernetes.io/version=1.0
+  Annotations:      app.kubernetes.io/owner: consultingFirm
+                    app.kubernetes.io/version: 1.0
+  Service Account:  ecr-sa
+  Containers:
+   ecr-sync:
+    Image:           amazon/aws-cli:latest
+    Port:            <none>
+    Host Port:       <none>
+    SeccompProfile:  RuntimeDefault
+    Command:
+      /bin/sh
+      -ce
+      # Create writable AWS config directory
+      mkdir -p /tmp/.aws
+      export AWS_CONFIG_FILE=/tmp/.aws/config
+      export AWS_SHARED_CREDENTIALS_FILE=/tmp/.aws/credentials
+      
+      
+      while true; do
+        CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+        # ECR Initialization
+        aws ecr get-login-password --region ${REGION} > /token/ecr-token
+        cd /tmp && /usr/bin/curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
+        python3 -c "import tarfile; import os; tar=tarfile.open('/tmp/openshift-client-linux.tar.gz', 'r:gz'); tar.extractall('/tmp'); tar.close(); os.system('ls -la /tmp/oc')"                                                                                                                                 
+        # Command for create-secret
+        /tmp/oc create secret docker-registry regcred \
+           --dry-run=client \
+           --docker-server="818140567777.dkr.ecr.us-east-1.amazonaws.com" \
+           --docker-username=AWS \
+           --docker-password="$(cat /token/ecr-token)" \
+           -o yaml | /tmp/oc apply -f -
+      
+        echo "Successfully Secret Created at [$CURRENT_TIME]"
+      
+        # Additional commands for create-secret if needed
+      
+        sleep 6h
+      done
+    Limits:
+      cpu:     1
+      memory:  2G
+    Requests:
+      cpu:     500m
+      memory:  1G
+    Environment:
+      REGION:                       us-east-1
+      HOME:                         /tmp
+      AWS_CONFIG_FILE:              /tmp/.aws/config
+      AWS_SHARED_CREDENTIALS_FILE:  /tmp/.aws/credentials
+    Mounts:
+      /token from token (rw)
+  Volumes:
+   token:
+    Type:          EmptyDir (a temporary directory that shares a pod's lifetime)
+    Medium:        Memory
+    SizeLimit:     <unset>
+  Node-Selectors:  <none>
+  Tolerations:     <none>
+Conditions:
+  Type             Status  Reason
+  ----             ------  ------
+  Progressing      True    NewReplicaSetAvailable
+  Available        False   MinimumReplicasUnavailable
+  ReplicaFailure   True    FailedCreate
+OldReplicaSets:    <none>
+NewReplicaSet:     ecr-credentials-sync-8547b7898c (0/1 replicas created)
+Events:            <none>
+
+
+Name:                   excel-service
+Namespace:              cf-dev
+CreationTimestamp:      Tue, 29 Jul 2025 01:25:31 -0500
+Labels:                 app=excel-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 3
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=excel-service
+Replicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  app=excel-service
+           version=1.0.0
+  Containers:
+   excel-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/common-excel-service:latest
+    Port:       8083/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:         200m
+      memory:      256Mi
+    Liveness:      http-get http://:8083/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:     http-get http://:8083/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:   <none>
+    Mounts:        <none>
+  Volumes:         <none>
+  Node-Selectors:  <none>
+  Tolerations:     <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  excel-service-58d84f8654 (0/0 replicas created)
+NewReplicaSet:   excel-service-d75bf7b5f (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   frontend-service
+Namespace:              cf-dev
+CreationTimestamp:      Wed, 30 Jul 2025 23:04:56 -0500
+Labels:                 app=frontend-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 1
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=frontend-service
+Replicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  app=frontend-service
+           version=1.0.0
+  Containers:
+   frontend-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/frontend:latest
+    Port:       3000/TCP
+    Host Port:  0/TCP
+    Command:
+      /bin/sh
+    Args:
+      /scripts/start.sh
+    Limits:
+      cpu:     250m
+      memory:  256Mi
+    Requests:
+      cpu:      100m
+      memory:   128Mi
+    Liveness:   http-get http://:3000/ delay=60s timeout=1s period=30s #success=1 #failure=5
+    Readiness:  http-get http://:3000/ delay=30s timeout=1s period=10s #success=1 #failure=5
+    Environment:
+      NODE_ENV:           development
+      PORT:               3000
+      REACT_APP_API_URL:  https://apigateway-app-cf-dev.apps.o0r9m0f2v7l3b1c.55n4.p1.openshiftapps.com
+    Mounts:
+      /scripts from frontend-scripts (ro)
+  Volumes:
+   frontend-scripts:
+    Type:          ConfigMap (a volume populated by a ConfigMap)
+    Name:          frontend-scripts
+    Optional:      false
+  Node-Selectors:  <none>
+  Tolerations:     <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      True    MinimumReplicasAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   frontend-service-54f78c7966 (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   interviews-service
+Namespace:              cf-dev
+CreationTimestamp:      Wed, 30 Jul 2025 19:10:52 -0500
+Labels:                 app=interviews-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 3
+                        meta.helm.sh/release-name: interviews-service
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=interviews-service
+Replicas:               2 desired | 2 updated | 2 total | 0 available | 2 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:       app=interviews-service
+                version=1.0.0
+  Annotations:  kubectl.kubernetes.io/restartedAt: 2025-08-03T01:35:59-05:00
+  Containers:
+   interviews-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/interviews-service:latest
+    Port:       8086/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      200m
+      memory:   256Mi
+    Liveness:   http-get http://:8086/actuator/health delay=120s timeout=10s period=30s #success=1 #failure=3
+    Readiness:  http-get http://:8086/actuator/health delay=90s timeout=10s period=30s #success=1 #failure=3
+    Environment:
+      SERVER_PORT:                                         8086
+      SPRING_PROFILES_ACTIVE:                              openshift
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:               http://naming-server-new:8761/eureka
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS:                   true
+      EUREKA_INSTANCE_HOSTNAME:                            interviews-service
+      SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICE_BASE_URL:  http://interviews-service:8086
+      SPRING_BOOT_ADMIN_CLIENT_URL:                        http://spring-boot-admin:8082
+      SPRING_CLOUD_CONFIG_URI:                             http://spring-cloud-config-service:8888
+      SPRING_CLOUD_CONFIG_FAIL_FAST:                       false
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:           health,info,metrics
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:             always
+      LOGGING_LEVEL_ROOT:                                  INFO
+      SPRING_DATASOURCE_URL:                               jdbc:postgresql://cf-aurora-pg-cluster-dev.cluster-c5ouqg2i83zv.us-west-1.rds.amazonaws.com:5432/cfdb_dev
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME:                 org.postgresql.Driver
+      SPRING_DATASOURCE_USERNAME:                          cfadmin
+      SPRING_DATASOURCE_PASSWORD:                          svktekdbdev
+      SPRING_JPA_DATABASE_PLATFORM:                        org.hibernate.dialect.PostgreSQLDialect
+      SPRING_JPA_HIBERNATE_DDL_AUTO:                       update
+      EXCEL_PROCESSOR_URL:                                 http://excel-service:8083
+      INTERVIEWS_EXCEL_SHEET_INDEX:                        0
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:                http://naming-server-new:8761/eureka
+      JAVA_OPTS:                                           -Dspring.cloud.config.uri=http://spring-cloud-config-service:8888
+    Mounts:                                                <none>
+  Volumes:                                                 <none>
+  Node-Selectors:                                          <none>
+  Tolerations:                                             <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      False   MinimumReplicasUnavailable
+OldReplicaSets:  interviews-service-76fb5686c5 (0/0 replicas created), interviews-service-7ff575447 (0/0 replicas created)
+NewReplicaSet:   interviews-service-856f6c5cf9 (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   naming-server-new
+Namespace:              cf-dev
+CreationTimestamp:      Mon, 28 Jul 2025 22:58:16 -0500
+Labels:                 app=naming-server-new
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 3
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=naming-server-new
+Replicas:               1 desired | 1 updated | 1 total | 1 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:       app=naming-server-new
+                version=1.0.0
+  Annotations:  kubectl.kubernetes.io/restartedAt: 2025-08-03T00:52:13-05:00
+  Containers:
+   naming-server-new:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/naming-server-service:latest
+    Port:       8761/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      200m
+      memory:   256Mi
+    Liveness:   http-get http://:8761/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:  http-get http://:8761/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:
+      SPRING_PROFILES_ACTIVE:                              openshift
+      SERVER_PORT:                                         8761
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA:                  false
+      EUREKA_CLIENT_FETCH_REGISTRY:                        false
+      SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICE_BASE_URL:  http://naming-server-new:8761
+      SPRING_BOOT_ADMIN_CLIENT_URL:                        http://spring-boot-admin:8082
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:           health,info,metrics
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:             always
+    Mounts:                                                <none>
+  Volumes:                                                 <none>
+  Node-Selectors:                                          <none>
+  Tolerations:                                             <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  naming-server-new-5477d6598f (0/0 replicas created), naming-server-new-dc7d87946 (0/0 replicas created)
+NewReplicaSet:   naming-server-new-74c4c87bd4 (1/1 replicas created)
+Events:          <none>
+
+
+Name:                   placements-service
+Namespace:              cf-dev
+CreationTimestamp:      Wed, 30 Jul 2025 20:50:04 -0500
+Labels:                 app=placements-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 1
+                        meta.helm.sh/release-name: placements
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=placements-service
+Replicas:               2 desired | 2 updated | 2 total | 0 available | 2 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  app=placements-service
+           version=1.0.0
+  Containers:
+   placements-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/placements-service:latest
+    Port:       8085/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:      200m
+      memory:   256Mi
+    Liveness:   http-get http://:8085/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:  http-get http://:8085/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:
+      SERVER_PORT:                                         8085
+      SPRING_PROFILES_ACTIVE:                              dev
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:               http://naming-server-new:8761/eureka
+      EUREKA_INSTANCE_PREFER_IP_ADDRESS:                   true
+      EUREKA_INSTANCE_HOSTNAME:                            placements-service
+      SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICE_BASE_URL:  http://placements-service:8085
+      SPRING_BOOT_ADMIN_CLIENT_URL:                        http://spring-boot-admin:8082
+      SPRING_CLOUD_CONFIG_URI:                             {{ .Values.config.configServerUri }}
+      SPRING_CLOUD_CONFIG_FAIL_FAST:                       false
+      JAVA_OPTS:                                           -Dspring.cloud.config.uri={{ .Values.config.configServerUri }} -Dplacements-excel-sheet-index=0
+      EXCEL_PROCESSOR_URL:                                 http://excel-service:8083
+      PLACEMENTS_EXCEL_SHEET_INDEX:                        0
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:           health,info,metrics
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:             always
+      LOGGING_LEVEL_ROOT:                                  INFO
+      SPRING_DATASOURCE_URL:                               jdbc:postgresql://cf-aurora-pg-cluster-dev.cluster-c5ouqg2i83zv.us-west-1.rds.amazonaws.com:5432/cfdb_dev
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME:                 org.postgresql.Driver
+      SPRING_DATASOURCE_USERNAME:                          cfadmin
+      SPRING_DATASOURCE_PASSWORD:                          svktekdbdev
+      SPRING_JPA_DATABASE_PLATFORM:                        org.hibernate.dialect.PostgreSQLDialect
+      SPRING_JPA_HIBERNATE_DDL_AUTO:                       update
+    Mounts:                                                <none>
+  Volumes:                                                 <none>
+  Node-Selectors:                                          <none>
+  Tolerations:                                             <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      False   MinimumReplicasUnavailable
+OldReplicaSets:  <none>
+NewReplicaSet:   placements-service-6cf6c6b68f (2/2 replicas created)
+Events:          <none>
+
+
+Name:                   spring-boot-admin
+Namespace:              cf-dev
+CreationTimestamp:      Mon, 28 Jul 2025 22:58:16 -0500
+Labels:                 app=spring-boot-admin
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 1
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=spring-boot-admin
+Replicas:               1 desired | 1 updated | 1 total | 1 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  app=spring-boot-admin
+           version=1.0.0
+  Containers:
+   spring-boot-admin:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/spring-boot-admin:latest
+    Port:       8082/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:         200m
+      memory:      256Mi
+    Liveness:      http-get http://:8082/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:     http-get http://:8082/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:   <none>
+    Mounts:        <none>
+  Volumes:         <none>
+  Node-Selectors:  <none>
+  Tolerations:     <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      True    MinimumReplicasAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   spring-boot-admin-5bccf68cff (1/1 replicas created)
+Events:          <none>
+
+
+Name:                   spring-cloud-config-service
+Namespace:              cf-dev
+CreationTimestamp:      Tue, 29 Jul 2025 10:51:49 -0500
+Labels:                 app=spring-cloud-config-service
+                        app.kubernetes.io/managed-by=Helm
+                        version=1.0.0
+Annotations:            deployment.kubernetes.io/revision: 2
+                        meta.helm.sh/release-name: cf-microservices-dev
+                        meta.helm.sh/release-namespace: cf-dev
+Selector:               app=spring-cloud-config-service
+Replicas:               1 desired | 1 updated | 1 total | 0 available | 1 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:       app=spring-cloud-config-service
+                version=1.0.0
+  Annotations:  kubectl.kubernetes.io/restartedAt: 2025-08-03T00:47:23-05:00
+  Containers:
+   spring-cloud-config-service:
+    Image:      818140567777.dkr.ecr.us-east-1.amazonaws.com/consultingfirm/spring_cloud_config:latest
+    Port:       8888/TCP
+    Host Port:  0/TCP
+    Limits:
+      cpu:     500m
+      memory:  512Mi
+    Requests:
+      cpu:         200m
+      memory:      256Mi
+    Liveness:      http-get http://:8888/actuator/health delay=60s timeout=1s period=30s #success=1 #failure=3
+    Readiness:     http-get http://:8888/actuator/health delay=30s timeout=1s period=10s #success=1 #failure=3
+    Environment:   <none>
+    Mounts:        <none>
+  Volumes:         <none>
+  Node-Selectors:  <none>
+  Tolerations:     <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Progressing    True    NewReplicaSetAvailable
+  Available      False   MinimumReplicasUnavailable
+OldReplicaSets:  spring-cloud-config-service-657b64d5d5 (0/0 replicas created)
+NewReplicaSet:   spring-cloud-config-service-58f967cb8d (1/1 replicas created)
+Events:          <none>

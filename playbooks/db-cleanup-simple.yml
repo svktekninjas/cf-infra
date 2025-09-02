@@ -1,0 +1,142 @@
+---
+# Simple Aurora DB Cleanup Playbook
+# Usage: ansible-playbook playbooks/db-cleanup-simple.yml -e target_environment=dev -e aws_profile=sid-KS -e cleanup_confirmation=DELETE
+
+- name: Aurora DB Cleanup
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    aws_region: us-west-1
+    aws_profile: "{{ aws_profile | default('sid-KS') }}"
+    target_environment: "{{ target_environment | default('dev') }}"
+    
+    # DB Configuration
+    db_cluster_name: "cf-aurora-pg-cluster-{{ target_environment }}"
+    db_writer_name: "cf-aurora-pg-writer-{{ target_environment }}"
+    db_reader_name: "cf-aurora-pg-reader-{{ target_environment }}"
+
+  tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - aws_profile is defined
+          - target_environment is defined
+          - cleanup_confirmation is defined
+          - cleanup_confirmation == "DELETE"
+        fail_msg: |
+          Missing required variables. Please provide:
+          - aws_profile: AWS profile to use
+          - target_environment: Environment (dev/test/prod)
+          - cleanup_confirmation: Must be "DELETE" to confirm
+
+          Example:
+          ansible-playbook playbooks/db-cleanup-simple.yml -e target_environment=dev -e aws_profile=sid-KS -e cleanup_confirmation=DELETE
+
+    - name: Display cleanup warning
+      debug:
+        msg:
+          - "⚠️  === AURORA DB CLEANUP WARNING === ⚠️"
+          - "This will PERMANENTLY DELETE:"
+          - "- Cluster: {{ db_cluster_name }}"
+          - "- Writer: {{ db_writer_name }}"
+          - "- Reader: {{ db_reader_name }}"
+          - "- Region: {{ aws_region }}"
+          - "- Profile: {{ aws_profile }}"
+          - "ALL DATA WILL BE LOST!"
+
+    - name: Delete Aurora DB Reader Instance
+      shell: |
+        aws rds delete-db-instance \
+          --db-instance-identifier {{ db_reader_name }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --skip-final-snapshot \
+          --delete-automated-backups
+      register: delete_reader
+      failed_when: false
+      tags: db-instances
+
+    - name: Delete Aurora DB Writer Instance
+      shell: |
+        aws rds delete-db-instance \
+          --db-instance-identifier {{ db_writer_name }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --skip-final-snapshot \
+          --delete-automated-backups
+      register: delete_writer
+      failed_when: false
+      tags: db-instances
+
+    - name: Wait for instances to be deleted
+      shell: |
+        aws rds describe-db-instances \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBInstances[?starts_with(DBInstanceIdentifier, `cf-aurora-pg`)].DBInstanceIdentifier' \
+          --output text
+      register: remaining_instances
+      until: remaining_instances.stdout == ""
+      retries: 30
+      delay: 30
+      failed_when: false
+      tags: db-instances
+
+    - name: Delete Aurora DB Cluster
+      shell: |
+        aws rds delete-db-cluster \
+          --db-cluster-identifier {{ db_cluster_name }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --skip-final-snapshot \
+          --delete-automated-backups
+      register: delete_cluster
+      failed_when: false
+      tags: db-cluster
+
+    - name: Wait for cluster to be deleted
+      shell: |
+        aws rds describe-db-clusters \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBClusters[?starts_with(DBClusterIdentifier, `cf-aurora-pg`)].DBClusterIdentifier' \
+          --output text
+      register: remaining_clusters
+      until: remaining_clusters.stdout == ""
+      retries: 20
+      delay: 30
+      failed_when: false
+      tags: db-cluster
+
+    - name: Clean up DB Subnet Groups
+      shell: |
+        aws rds describe-db-subnet-groups \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBSubnetGroups[?starts_with(DBSubnetGroupName, `cf`)].DBSubnetGroupName' \
+          --output text
+      register: subnet_groups
+      tags: db-networking
+
+    - name: Delete DB Subnet Groups
+      shell: |
+        aws rds delete-db-subnet-group \
+          --db-subnet-group-name {{ item }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }}
+      loop: "{{ subnet_groups.stdout.split() }}"
+      when: subnet_groups.stdout != ""
+      failed_when: false
+      tags: db-networking
+
+    - name: Display completion message
+      debug:
+        msg:
+          - "🎉 Aurora DB Cleanup Completed!"
+          - "✅ DB instances deleted"
+          - "✅ DB cluster deleted"
+          - "✅ DB subnet groups cleaned up"
+          - ""
+          - "⚠️  Please verify in AWS Console that all resources are deleted"
+          - "⚠️  Check AWS billing for any remaining charges"

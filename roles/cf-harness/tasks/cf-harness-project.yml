@@ -1,0 +1,77 @@
+---
+- name: Create cf-monitor project for monitoring workloads
+  uri:
+    url: "{{ harness_base_url }}/gateway/ng/api/projects?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      project:
+        identifier: "cf_monitor"
+        name: "CF Monitor"
+        description: "Project for Consulting Firm monitoring workloads from cf-monitor repository"
+        color: "#0063F7"
+        modules: ["CD"]
+        tags:
+          environment: "{{ target_environment | default('dev') }}"
+          managed_by: "ansible"
+          purpose: "monitoring"
+          repository: "cf-monitor"
+    status_code: [200, 201, 400]  # 400 if project already exists (Harness returns 400 for duplicates)
+  register: cf_monitor_project_result
+  failed_when: >
+    cf_monitor_project_result.status not in [200, 201, 400] or
+    (cf_monitor_project_result.status == 400 and 
+     cf_monitor_project_result.json.code != 'DUPLICATE_FIELD')
+
+- name: Display cf-monitor project creation status
+  debug:
+    msg: >-
+      {% if cf_monitor_project_result.status == 400 %}
+        Project 'cf_monitor' already exists
+      {% else %}
+        Successfully created project 'cf_monitor'
+      {% endif %}
+
+- name: Create cf-app project for application deployments
+  uri:
+    url: "{{ harness_base_url }}/gateway/ng/api/projects?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      project:
+        identifier: "cf_app"
+        name: "CF Application"
+        description: "Project for Consulting Firm application deployments from cf-deploy repository"
+        color: "#00B39E"
+        modules: ["CD"]
+        tags:
+          environment: "{{ target_environment | default('dev') }}"
+          managed_by: "ansible"
+          purpose: "application"
+          repository: "cf-deploy"
+    status_code: [200, 201, 400]  # 400 if project already exists (Harness returns 400 for duplicates)
+  register: cf_app_project_result
+  failed_when: >
+    cf_app_project_result.status not in [200, 201, 400] or
+    (cf_app_project_result.status == 400 and 
+     cf_app_project_result.json.code != 'DUPLICATE_FIELD')
+
+- name: Display cf-app project creation status
+  debug:
+    msg: >-
+      {% if cf_app_project_result.status == 400 %}
+        Project 'cf_app' already exists
+      {% else %}
+        Successfully created project 'cf_app'
+      {% endif %}
+
+- name: Set project identifiers for subsequent tasks
+  set_fact:
+    cf_monitor_project_id: "cf_monitor"
+    cf_app_project_id: "cf_app"

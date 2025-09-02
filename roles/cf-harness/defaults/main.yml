@@ -1,119 +1,92 @@
 ---
-# Default variables for cf-harness role
-
 # Harness Platform Configuration
-harness_platform_url: "https://app.harness.io"
-harness_api_endpoint: "https://app.harness.io/gateway/api"
-harness_api_base_url: "https://app.harness.io/gateway"  # Base URL for API calls
-harness_delegate_endpoint: "https://app.harness.io/grpc"
-harness_log_endpoint: "https://app.harness.io/log-service/"
-harness_org_id: "default"
-harness_project_id: "cf-deploy"
-
-# Method Selection (API recommended over CLI)
-use_harness_cli: false  # Set to true to use CLI instead of API (not recommended)
-use_harness_api: true   # Use REST API for full functionality
-
-# Harness CLI Configuration (if used)
-harness_cli_version: "latest"
-harness_cli_install_dir: "/usr/local/bin"
-harness_cli_config_dir: "{{ ansible_env.HOME }}/.harness"
-
-# Delegate Configuration
-harness_delegate_name: "rosa-harness-delegate"
-harness_delegate_namespace: "harness-delegate-ng"
-harness_delegate_replicas: 1
-harness_delegate_image: "harness/delegate:24.11.86804"
-harness_delegate_image_pull_policy: "Always"
-harness_delegate_tags: "rosa,cf-deploy,openshift"
-harness_delegate_description: "ROSA Cluster Delegate for CF Deployment"
-
-# Delegate Resources
-harness_delegate_cpu_request: "500m"
-harness_delegate_cpu_limit: "1000m"
-harness_delegate_memory_request: "1Gi"
-harness_delegate_memory_limit: "2Gi"
-
-# Service Account Configuration
-harness_deployer_sa_name: "ecr-sa"
-harness_deployer_namespaces:
-  - "cf-monitor"
-  - "cf-app"
-harness_delegate_sa_name: "cf-deploy"
+harness_base_url: "https://app.harness.io"
+harness_project_id: "default"
 
 # AWS Configuration
-aws_region: "us-east-1"
-aws_account_id_source: "818140567777"  # sidatks account (ECR)
-aws_account_id_target: "606639739464"  # svktek account (ROSA)
-ecr_registry: "{{ aws_account_id_source }}.dkr.ecr.{{ aws_region }}.amazonaws.com"
-ecr_cross_account_role_name: "ECRCrossAccountAdmin"
-ecr_assume_role_name: "ROSAECRAssumeRole"
-ecr_external_id: "cf-ecr-cross-account-{{ environment }}-2025"
+aws_account_id: "818140567777"
+ecr_region: "us-east-1"
+ecr_registry_url: "{{ aws_account_id }}.dkr.ecr.{{ ecr_region }}.amazonaws.com"
 
-# ROSA Cluster Configuration
-rosa_cluster_name: "cf-rosa-cluster-{{ environment }}"
-rosa_namespace: "cf-{{ environment }}"
+# Delegate Configuration
+delegate_name: "harness-{{ rosa_cluster_name | default('dgdev') }}"
+delegate_namespace: "harness-delegate-ng"
+delegate_replicas: 1
+delegate_cpu_request: "250m"
+delegate_memory_request: "1Gi"
+delegate_cpu_limit: "500m"
+delegate_memory_limit: "2Gi"
+delegate_jvm_memory: "2048M"
+use_ecr_delegate_image: false  # Set to true to use ECR image, false for Docker Hub
+delegate_image_tag: "25.08.86503"   # Use newer image version like working delegate
 
-# GitHub Configuration - These will be overridden by environment-specific vars
-github_url: "https://github.com"
-github_repo: "cf-deploy"
-github_username: ""  # Set in environment vars
-github_token_ref: ""  # Set in environment vars
-github_branch: "main"
+# Git Repository Configuration
+cf_monitor_repo_url: "https://github.com/svktekninjas/cf-monitor.git"
+cf_deploy_repo_url: "https://github.com/svktekninjas/cf-deploy.git"
+git_branch: "main"
 
-# Connector Identifiers
-connector_aws_ecr_id: "aws_ecr_connector_{{ environment }}"
-connector_rosa_cluster_id: "rosa_cluster_connector_{{ environment }}"
-connector_github_id: "cf_deploy_github"
+# Helm Chart Configuration - Fixed paths
+cf_monitor_helm_path: "helm/cf-monitor"
+cf_deploy_helm_path: "helm/cf-deploy"
+helm_version: "V3"
+
+# ECR Image Configuration - Standardized naming
+cf_monitor_image_path: "consultingfirm/cf-monitor"
+cf_deploy_image_path: "consultingfirm/cf-deploy"
+harness_delegate_image_path: "harness-delegate"
+
+# Kubernetes Configuration
+workload_namespace: "cf-workloads"
+cluster_permission_type: "CLUSTER_ADMIN"
+k8s_permission_type: "CLUSTER_ADMIN"
 
 # Environment Configuration
-environment: "dev"
-environments_list:
-  - dev
-  - test
-  - prod
+environments:
+  - name: "development"
+    identifier: "development"
+    type: "PreProduction"
+    description: "Development environment for CF workloads"
+  - name: "staging"
+    identifier: "staging"
+    type: "PreProduction"
+    description: "Staging environment for CF workloads"
+  - name: "production"
+    identifier: "production"
+    type: "Production"
+    description: "Production environment for CF workloads"
 
-# Microservices Configuration
-microservices_list:
-  - naming-server
-  - api-gateway
-  - spring-boot-admin
-  - config-service
-  - excel-service
-  - bench-profile
-  - daily-submissions
-  - interviews
-  - placements
-  - frontend
+# Pipeline Configuration
+pipeline_timeout: "10m"
+health_check_timeout: "5m"
+rollback_timeout: "5m"
 
-# Feature Flags
-enable_delegate_installation: true
-enable_connector_creation: true
-enable_service_creation: true
-enable_pipeline_creation: false
-enable_irsa_configuration: true
-enable_cross_account_ecr: true
+# Trigger Configuration
+git_trigger_events:
+  - "Closed"
+auto_abort_previous_executions: false
 
-# Retry Configuration
-max_retries: 3
-retry_delay: 10
+# Connector Configuration
+connector_validation_timeout: 300
+delegate_selector_timeout: 600
 
-# Validation Settings
-validate_prerequisites: true
-validate_cli_installation: true
-validate_cluster_access: true
-validate_aws_credentials: true
-validate_harness_connection: true
+# Security Configuration
+secret_scope: "PROJECT"
+secret_type: "SecretText"
 
-# Cleanup Settings
-cleanup_on_failure: false
-remove_existing_delegate: false
+# Monitoring Configuration
+enable_monitoring: true
+enable_notifications: true
+notification_channels:
+  - email
+  - slack
 
-# Debug Settings
-debug_mode: false
-verbose_output: false
-save_validation_report: true
+# Deployment Strategy
+deployment_strategy: "rolling"
+max_unavailable: "25%"
+max_surge: "25%"
 
-# API Response Settings
-api_request_timeout: 30
-api_validate_certs: true
+# Resource Limits
+default_cpu_request: "100m"
+default_memory_request: "128Mi"
+default_cpu_limit: "500m"
+default_memory_limit: "512Mi"

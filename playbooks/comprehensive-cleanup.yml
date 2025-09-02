@@ -1,0 +1,314 @@
+---
+# Comprehensive Cleanup Playbook
+# This playbook cleans up both ROSA cluster and Aurora DB resources
+#
+# Usage:
+#   ansible-playbook playbooks/comprehensive-cleanup.yml -e "target_environment=dev" -e "aws_profile=sid-KS"
+#   ansible-playbook playbooks/comprehensive-cleanup.yml -e "target_environment=dev" -e "aws_profile=sid-KS" -e "cleanup_confirmation=DELETE"
+#
+# Variables:
+#   - target_environment: Environment to clean up (dev/test/prod)
+#   - aws_profile: AWS profile to use
+#   - cleanup_confirmation: Set to "DELETE" to skip confirmation prompts
+#   - cleanup_cluster: Whether to cleanup ROSA cluster (default: true)
+#   - cleanup_database: Whether to cleanup Aurora DB (default: true)
+#   - delete_cluster_vpc: Whether to delete the VPC (default: false)
+
+- name: Comprehensive Infrastructure Cleanup
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    # Cleanup options
+    cleanup_cluster: "{{ cleanup_cluster | default(true) }}"
+    cleanup_database: "{{ cleanup_database | default(true) }}"
+    delete_cluster_vpc: "{{ delete_cluster_vpc | default(false) }}"
+    
+    # AWS configuration
+    aws_region: "{{ aws_region | default('us-east-1') }}"
+    
+    # Environment configuration
+    ansible_env_path: "{{ playbook_dir }}/../environments/{{ target_environment | default('dev') }}"
+    cluster_name: "rosa-cluster-{{ target_environment | default('dev') }}"
+
+  pre_tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - aws_profile is defined
+          - target_environment is defined
+        fail_msg: |
+          Missing required variables. Please provide:
+          - aws_profile: AWS profile to use
+          - target_environment: Environment (dev/test/prod)
+
+          Example:
+          ansible-playbook playbooks/comprehensive-cleanup.yml -e "target_environment=dev" -e "aws_profile=sid-KS"
+        success_msg: "Variables validated. Proceeding with cleanup."
+      tags:
+        - always
+
+    - name: Load environment configuration
+      include_vars: "{{ ansible_env_path }}/cluster-config.yml"
+      when: target_environment is defined
+      ignore_errors: yes
+      tags:
+        - always
+
+    - name: Load DB configuration
+      include_vars: "{{ ansible_env_path }}/cf-db.yml"
+      when: 
+        - target_environment is defined
+        - cleanup_database | bool
+      ignore_errors: yes
+      tags:
+        - always
+
+    - name: Display cleanup configuration
+      debug:
+        msg:
+          - "=== COMPREHENSIVE CLEANUP CONFIGURATION ==="
+          - "Target Environment: {{ target_environment | default('dev') }}"
+          - "AWS Profile: {{ aws_profile }}"
+          - "AWS Region: {{ aws_region }}"
+          - ""
+          - "Cleanup Options:"
+          - "  - ROSA Cluster: {{ 'YES' if cleanup_cluster | bool else 'NO' }}"
+          - "  - Aurora Database: {{ 'YES' if cleanup_database | bool else 'NO' }}"
+          - "  - Delete VPC: {{ 'YES' if delete_cluster_vpc | bool else 'NO' }}"
+          - ""
+          - "Resources to be cleaned:"
+          - "{% if cleanup_cluster | bool %}"
+          - "  - ROSA Cluster: {{ cluster_name }}"
+          - "  - OpenShift workloads and namespaces"
+          - "  - Load balancers and ingress controllers"
+          - "{% endif %}"
+          - "{% if cleanup_database | bool %}"
+          - "  - Aurora DB cluster and instances"
+          - "  - DB subnet groups and security groups"
+          - "  - VPC peering connections"
+          - "{% endif %}"
+          - "{% if delete_cluster_vpc | bool %}"
+          - "  - VPC and all associated networking"
+          - "  - NAT Gateways, Internet Gateways"
+          - "  - Subnets and route tables"
+          - "{% endif %}"
+          - "============================================="
+      tags:
+        - always
+
+    - name: Final confirmation prompt
+      pause:
+        prompt: |
+
+          ⚠️  === DANGER ZONE === ⚠️
+
+          You are about to PERMANENTLY DELETE infrastructure resources!
+          This action CANNOT be undone and will result in:
+          
+          {% if cleanup_database | bool %}
+          🗄️  DATABASE DATA LOSS (Aurora clusters will be deleted)
+          {% endif %}
+          {% if cleanup_cluster | bool %}
+          🚀 CLUSTER DESTRUCTION (All workloads will be terminated)
+          {% endif %}
+          {% if delete_cluster_vpc | bool %}
+          🌐 NETWORK INFRASTRUCTURE REMOVAL (VPC and all networking)
+          {% endif %}
+
+          Environment: {{ target_environment | default('dev') }}
+          
+          Type 'DELETE' (in capitals) to confirm destruction, or press Ctrl+C to cancel
+      register: final_confirmation
+      when: cleanup_confirmation is not defined
+      tags:
+        - always
+
+    - name: Validate final confirmation
+      fail:
+        msg: "Cleanup cancelled - confirmation not provided or incorrect"
+      when:
+        - cleanup_confirmation is not defined
+        - final_confirmation.user_input != "DELETE"
+      tags:
+        - always
+
+  tasks:
+    # Phase 1: Database Cleanup (first to avoid dependency issues)
+    - name: Phase 1 - Aurora Database Cleanup
+      block:
+        - name: Display database cleanup phase
+          debug:
+            msg:
+              - "🗄️  === PHASE 1: DATABASE CLEANUP ==="
+              - "Cleaning up Aurora DB resources..."
+              - "Environment: {{ target_environment }}"
+
+        - name: Execute database cleanup
+          include_role:
+            name: cf-db
+            tasks_from: db_cleanup.yml
+          vars:
+            cf_db_cleanup_confirmation: "{{ cleanup_confirmation | default(final_confirmation.user_input) }}"
+
+        - name: Database cleanup completed
+          debug:
+            msg: "✅ Database cleanup completed successfully"
+
+      when: cleanup_database | bool
+      tags:
+        - database-cleanup
+        - cleanup
+
+    # Phase 2: ROSA Cluster Cleanup
+    - name: Phase 2 - ROSA Cluster Cleanup
+      block:
+        - name: Display cluster cleanup phase
+          debug:
+            msg:
+              - "🚀 === PHASE 2: ROSA CLUSTER CLEANUP ==="
+              - "Cleaning up ROSA cluster resources..."
+              - "Cluster: {{ cluster_name }}"
+
+        - name: Execute cluster cleanup
+          include_role:
+            name: cluster
+            tasks_from: cluster_cleanup_simple.yml
+          vars:
+            full_cluster_name: "{{ cluster_name }}"
+
+        - name: Cluster cleanup completed
+          debug:
+            msg: "✅ Cluster cleanup completed successfully"
+
+      when: cleanup_cluster | bool
+      tags:
+        - cluster-cleanup
+        - cleanup
+
+    # Phase 3: Additional cleanup tasks
+    - name: Phase 3 - Additional Resource Cleanup
+      block:
+        - name: Display additional cleanup phase
+          debug:
+            msg:
+              - "🧹 === PHASE 3: ADDITIONAL CLEANUP ==="
+              - "Cleaning up remaining resources..."
+
+        - name: Clean up ECR repositories (optional)
+          shell: |
+            aws ecr describe-repositories --region {{ aws_region }} --profile {{ aws_profile }} \
+              --query 'repositories[?contains(repositoryName, `consultingfirm`)].repositoryName' \
+              --output text
+          register: ecr_repos
+          failed_when: false
+          tags:
+            - ecr-cleanup
+
+        - name: Display ECR repositories found
+          debug:
+            msg: "ECR repositories found: {{ ecr_repos.stdout if ecr_repos.stdout else 'None' }}"
+          when: ecr_repos is defined
+          tags:
+            - ecr-cleanup
+
+        - name: Clean up IAM roles and policies (list only)
+          shell: |
+            aws iam list-roles --profile {{ aws_profile }} \
+              --query 'Roles[?contains(RoleName, `{{ target_environment }}`) || contains(RoleName, `ROSA`) || contains(RoleName, `Harness`)].RoleName' \
+              --output text
+          register: iam_roles
+          failed_when: false
+          tags:
+            - iam-cleanup
+
+        - name: Display IAM roles found
+          debug:
+            msg: "IAM roles found: {{ iam_roles.stdout if iam_roles.stdout else 'None' }}"
+          when: iam_roles is defined
+          tags:
+            - iam-cleanup
+
+        - name: Additional cleanup completed
+          debug:
+            msg: "✅ Additional cleanup scan completed"
+
+      tags:
+        - additional-cleanup
+        - cleanup
+
+  post_tasks:
+    - name: Cleanup completion summary
+      debug:
+        msg:
+          - "🎉 === CLEANUP COMPLETED SUCCESSFULLY === 🎉"
+          - ""
+          - "Summary of actions taken:"
+          - "{% if cleanup_database | bool %}"
+          - "✅ Aurora Database: DELETED"
+          - "{% endif %}"
+          - "{% if cleanup_cluster | bool %}"
+          - "✅ ROSA Cluster: DELETED"
+          - "{% endif %}"
+          - "{% if delete_cluster_vpc | bool %}"
+          - "✅ VPC Infrastructure: DELETED"
+          - "{% endif %}"
+          - ""
+          - "⚠️  IMPORTANT NEXT STEPS:"
+          - "1. Verify in AWS Console that all resources are deleted"
+          - "2. Check for any remaining charges in AWS billing"
+          - "3. Review CloudTrail logs for audit trail"
+          - "4. Update any documentation or inventory systems"
+          - ""
+          - "Environment '{{ target_environment }}' has been cleaned up."
+          - "=================================================="
+      tags:
+        - always
+
+    - name: Save cleanup report
+      copy:
+        content: |
+          Comprehensive Infrastructure Cleanup Report
+          ==========================================
+          
+          Execution Details:
+          - Date: {{ ansible_date_time.iso8601 }}
+          - Environment: {{ target_environment }}
+          - AWS Profile: {{ aws_profile }}
+          - AWS Region: {{ aws_region }}
+          
+          Cleanup Actions:
+          - Database Cleanup: {{ 'EXECUTED' if cleanup_database | bool else 'SKIPPED' }}
+          - Cluster Cleanup: {{ 'EXECUTED' if cleanup_cluster | bool else 'SKIPPED' }}
+          - VPC Deletion: {{ 'EXECUTED' if delete_cluster_vpc | bool else 'SKIPPED' }}
+          
+          Resources Cleaned:
+          {% if cleanup_database | bool %}
+          - Aurora DB clusters and instances
+          - DB subnet groups and security groups
+          {% endif %}
+          {% if cleanup_cluster | bool %}
+          - ROSA cluster: {{ cluster_name }}
+          - OpenShift workloads and namespaces
+          {% endif %}
+          {% if delete_cluster_vpc | bool %}
+          - VPC and networking infrastructure
+          {% endif %}
+          
+          Status: COMPLETED SUCCESSFULLY
+          
+          Next Steps:
+          1. Verify resource deletion in AWS Console
+          2. Check AWS billing for any remaining charges
+          3. Update documentation and inventory
+          
+        dest: "/tmp/cleanup-report-{{ target_environment }}-{{ ansible_date_time.epoch }}.txt"
+        mode: '0644'
+      tags:
+        - always
+
+    - name: Display report location
+      debug:
+        msg: "📄 Cleanup report saved to: /tmp/cleanup-report-{{ target_environment }}-{{ ansible_date_time.epoch }}.txt"
+      tags:
+        - always

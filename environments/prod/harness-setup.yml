@@ -1,0 +1,106 @@
+---
+# Production Environment Configuration for Harness Setup
+
+# Harness Platform Configuration
+harness_account_id: "{{ vault_harness_account_id }}"
+harness_org_id: "{{ vault_harness_org_id }}"
+harness_api_token: "{{ vault_harness_api_token }}"
+harness_project_id: "cf_prod_project"
+
+# ROSA Cluster Configuration
+rosa_cluster_name: "cf-prod-cluster"
+
+# GitHub Configuration
+github_username: "{{ vault_github_username }}"
+github_token: "{{ vault_github_token }}"
+
+# Delegate Configuration (Production)
+delegate_name: "cf-harness-delegate-prod"
+delegate_replicas: 3
+delegate_cpu_request: "1.0"
+delegate_memory_request: "4096Mi"
+delegate_cpu_limit: "2.0"
+delegate_memory_limit: "8192Mi"
+
+# Environment Overrides for Production
+environments:
+  - name: "staging"
+    identifier: "staging"
+    type: "PreProduction"
+    description: "Staging environment for CF workloads"
+  - name: "production"
+    identifier: "production"
+    type: "Production"
+    description: "Production environment for CF workloads"
+
+# Resource Limits (Production)
+default_cpu_request: "200m"
+default_memory_request: "256Mi"
+default_cpu_limit: "1000m"
+default_memory_limit: "1024Mi"
+
+# Pipeline Configuration (Production)
+pipeline_timeout: "15m"
+health_check_timeout: "10m"
+rollback_timeout: "10m"
+
+# Monitoring Configuration (Production)
+enable_monitoring: true
+enable_notifications: true
+notification_channels:
+  - email
+  - slack
+  - pagerduty
+
+# Git Configuration (Production)
+git_branch: "main"
+
+# Security Configuration (Production)
+secret_scope: "ACCOUNT"
+
+# Deployment Strategy (Production)
+deployment_strategy: "canary"
+max_unavailable: "10%"
+max_surge: "25%"
+
+# Production-specific configuration
+production_settings:
+  backup_enabled: true
+  disaster_recovery: true
+  multi_az_deployment: true
+  auto_scaling: true
+  security_scanning: true
+  compliance_checks: true
+
+# Approval Configuration (Production)
+approval_required: true
+approval_timeout: "24h"
+approvers:
+  - "production-approvers"
+  - "security-team"
+  - "platform-team"
+
+# Production-specific tags
+common_tags:
+  environment: "production"
+  managed_by: "ansible"
+  cost_center: "production"
+  project: "cf-workloads"
+  criticality: "high"
+  backup: "enabled"
+  monitoring: "enhanced"
+
+# Compliance and Security
+compliance:
+  sox_compliant: true
+  gdpr_compliant: true
+  audit_logging: true
+  encryption_at_rest: true
+  encryption_in_transit: true
+
+# SLA Configuration
+sla:
+  availability: "99.9%"
+  response_time: "< 200ms"
+  recovery_time: "< 15min"
+  recovery_point: "< 5min"

@@ -1,0 +1,77 @@
+---
+# Test Environment Configuration for Harness Setup
+
+# Harness Platform Configuration
+harness_account_id: "{{ vault_harness_account_id }}"
+harness_org_id: "{{ vault_harness_org_id }}"
+harness_api_token: "{{ vault_harness_api_token }}"
+harness_project_id: "cf_test_project"
+
+# ROSA Cluster Configuration
+rosa_cluster_name: "cf-test-cluster"
+
+# GitHub Configuration
+github_username: "{{ vault_github_username }}"
+github_token: "{{ vault_github_token }}"
+
+# Delegate Configuration (Test)
+delegate_name: "cf-harness-delegate-test"
+delegate_replicas: 2
+delegate_cpu_request: "0.5"
+delegate_memory_request: "2048Mi"
+delegate_cpu_limit: "1.0"
+delegate_memory_limit: "4096Mi"
+
+# Environment Overrides for Test
+environments:
+  - name: "development"
+    identifier: "development"
+    type: "PreProduction"
+    description: "Development environment for CF workloads"
+  - name: "staging"
+    identifier: "staging"
+    type: "PreProduction"
+    description: "Staging environment for CF workloads"
+
+# Resource Limits (Test)
+default_cpu_request: "100m"
+default_memory_request: "128Mi"
+default_cpu_limit: "500m"
+default_memory_limit: "512Mi"
+
+# Pipeline Configuration (Test)
+pipeline_timeout: "8m"
+health_check_timeout: "3m"
+rollback_timeout: "3m"
+
+# Monitoring Configuration (Test)
+enable_monitoring: true
+enable_notifications: true
+notification_channels:
+  - email
+
+# Git Configuration (Test)
+git_branch: "main"
+
+# Security Configuration (Test)
+secret_scope: "PROJECT"
+
+# Deployment Strategy (Test)
+deployment_strategy: "blue-green"
+max_unavailable: "0%"
+max_surge: "100%"
+
+# Test-specific configuration
+test_automation:
+  enabled: true
+  smoke_tests: true
+  integration_tests: true
+  performance_tests: false
+
+# Test-specific tags
+common_tags:
+  environment: "test"
+  managed_by: "ansible"
+  cost_center: "testing"
+  project: "cf-workloads"
+  automation: "enabled"

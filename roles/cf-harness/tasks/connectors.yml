@@ -1,0 +1,206 @@
+---
+# Create Harness Connectors with skip logic for existing connectors
+
+# Check existing connectors first
+- name: Check existing connectors in cf_monitor
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+    status_code: [200]
+  register: existing_cf_monitor_connectors
+
+- name: Check existing connectors in cf_app
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+    status_code: [200]
+  register: existing_cf_app_connectors
+
+- name: Set existing connector facts
+  set_fact:
+    cf_monitor_connector_ids: "{{ existing_cf_monitor_connectors.json.data.content | map(attribute='connector.identifier') | list }}"
+    cf_app_connector_ids: "{{ existing_cf_app_connectors.json.data.content | map(attribute='connector.identifier') | list }}"
+
+# Connectors for cf_monitor project
+- name: Create Git connector for cf-monitor repository
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      connector:
+        name: "cf-monitor-git-connector"
+        identifier: "cf_monitor_git_connector"
+        description: "Git connector for cf-monitor repository"
+        type: "Github"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_monitor"
+        spec:
+          connectionType: "Repo"
+          type: "Account"
+          url: "{{ cf_monitor_repo_url }}"
+          authentication:
+            type: "Http"
+            spec:
+              type: "UsernameToken"
+              spec:
+                username: "{{ github_username }}"
+                tokenRef: "github_token"
+          apiAccess:
+            type: "Token"
+            spec:
+              tokenRef: "github_token"
+          delegateSelectors:
+            - "rosa"
+          executeOnDelegate: true
+    status_code: [200, 201, 400]
+  register: cf_monitor_git_connector
+  when: "'cf_monitor_git_connector' not in cf_monitor_connector_ids"
+
+# Connectors for cf_app project
+- name: Create Git connector for cf-deploy repository
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      connector:
+        name: "cf-deploy-git-connector"
+        identifier: "cf_deploy_git_connector"
+        description: "Git connector for cf-deploy repository"
+        type: "Github"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_app"
+        spec:
+          connectionType: "Repo"
+          type: "Account"
+          url: "{{ cf_deploy_repo_url }}"
+          authentication:
+            type: "Http"
+            spec:
+              type: "UsernameToken"
+              spec:
+                username: "{{ github_username }}"
+                tokenRef: "github_token"
+          apiAccess:
+            type: "Token"
+            spec:
+              tokenRef: "github_token"
+          delegateSelectors:
+            - "rosa"
+          executeOnDelegate: true
+    status_code: [200, 201, 400]
+  register: cf_deploy_git_connector
+  when: "'cf_deploy_git_connector' not in cf_app_connector_ids"
+
+# Shared connectors - create in both projects with proper AWS authentication
+- name: Create AWS connector for ECR and other services in both projects
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier={{ item }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      connector:
+        name: "aws-connector"
+        identifier: "aws_connector"
+        description: "AWS connector for ECR and other services"
+        type: "Aws"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "{{ item }}"
+        spec:
+          credential:
+            type: "ManualConfig"
+            spec:
+              accessKey: "org.aws_access_key_id"
+              secretKeyRef: "org.aws_secret_access_key"
+          regions:
+            - "{{ ecr_region }}"
+          delegateSelectors:
+            - "rosa"
+          executeOnDelegate: true
+    status_code: [200, 201, 400]
+  loop:
+    - cf_monitor
+    - cf_app
+  register: aws_connector_results
+  when: "'aws_connector' not in (cf_monitor_connector_ids if item == 'cf_monitor' else cf_app_connector_ids)"
+
+- name: Create Docker Registry connector for ECR in both projects
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier={{ item }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      connector:
+        name: "aws-ecr-connector"
+        identifier: "aws_ecr_connector"
+        description: "Docker Registry connector for AWS ECR"
+        type: "DockerRegistry"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "{{ item }}"
+        spec:
+          dockerRegistryUrl: "{{ ecr_registry_url }}"
+          providerType: "Other"
+          auth:
+            type: "Aws"
+            spec:
+              region: "{{ ecr_region }}"
+              awsConnectorRef: "aws_connector"
+          delegateSelectors:
+            - "rosa"
+          executeOnDelegate: true
+    status_code: [200, 201, 400]
+  loop:
+    - cf_monitor
+    - cf_app
+  register: ecr_connector_results
+  when: "'aws_ecr_connector' not in (cf_monitor_connector_ids if item == 'cf_monitor' else cf_app_connector_ids)"
+
+- name: Create Kubernetes cluster connector for ROSA in both projects
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier={{ item }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      connector:
+        name: "rosa-cluster-connector"
+        identifier: "rosa_cluster_connector"
+        description: "Kubernetes connector for ROSA cluster {{ rosa_cluster_name }}"
+        type: "K8sCluster"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "{{ item }}"
+        spec:
+          credential:
+            type: "InheritFromDelegate"
+          delegateSelectors:
+            - "rosa"
+          executeOnDelegate: true
+    status_code: [200, 201, 400]
+  loop:
+    - cf_monitor
+    - cf_app
+  register: k8s_connector_results
+  when: "'rosa_cluster_connector' not in (cf_monitor_connector_ids if item == 'cf_monitor' else cf_app_connector_ids)"
+
+- name: Display connector creation status
+  debug:
+    msg: "Created connectors for both projects: Git (cf-monitor, cf-deploy), AWS, ECR, and Kubernetes"

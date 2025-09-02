@@ -1,0 +1,220 @@
+---
+# Harness Delegate Deployment for ROSA/OpenShift
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ delegate_namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harness-delegate-sa
+  namespace: {{ delegate_namespace }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: harness-delegate-token
+  namespace: {{ delegate_namespace }}
+type: Opaque
+data:
+  DELEGATE_TOKEN: "{{ harness_api_token | b64encode }}"
+---
+# ECR Pull Secret for delegate image
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ecr-secret
+  namespace: {{ delegate_namespace }}
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {{ ecr_auth_config | to_json | b64encode }}
+---
+# ClusterRole for delegate permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: harness-delegate-cluster-role
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: harness-delegate-cluster-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: harness-delegate-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: harness-delegate-sa
+    namespace: {{ delegate_namespace }}
+---
+# Role for namespace-specific permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harness-delegate-role
+  namespace: {{ delegate_namespace }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harness-delegate-role-binding
+  namespace: {{ delegate_namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: harness-delegate-role
+subjects:
+  - kind: ServiceAccount
+    name: harness-delegate-sa
+    namespace: {{ delegate_namespace }}
+---
+# ConfigMap for delegate configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harness-delegate-config
+  namespace: {{ delegate_namespace }}
+data:
+  ACCOUNT_ID: "{{ harness_account_id }}"
+  ACCOUNT_SECRET: "{{ harness_api_token }}"
+  MANAGER_HOST_AND_PORT: "https://app.harness.io"
+  DELEGATE_NAME: "{{ delegate_name }}"
+  DELEGATE_PROFILE: ""
+  DELEGATE_TYPE: "KUBERNETES"
+  DEPLOY_MODE: "KUBERNETES"
+  DELEGATE_DESCRIPTION: "Delegate for CF workloads on {{ rosa_cluster_name }}"
+  DELEGATE_TAGS: "rosa,{{ rosa_cluster_name }},cf-workloads"
+  DELEGATE_ORG_IDENTIFIER: "{{ harness_org_id }}"
+  DELEGATE_PROJECT_IDENTIFIER: ""
+  PROXY_MANAGER: "true"
+  POLL_FOR_TASKS: "false"
+  ENABLE_CE: "false"
+  DELEGATE_NAMESPACE: "{{ delegate_namespace }}"
+  INIT_SCRIPT: ""
+  DELEGATE_TOKEN: "{{ harness_api_token }}"
+---
+# StatefulSet for delegate
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ delegate_name }}
+  namespace: {{ delegate_namespace }}
+  labels:
+    harness.io/name: {{ delegate_name }}
+spec:
+  replicas: {{ delegate_replicas }}
+  selector:
+    matchLabels:
+      harness.io/name: {{ delegate_name }}
+  serviceName: ""
+  template:
+    metadata:
+      labels:
+        harness.io/name: {{ delegate_name }}
+    spec:
+      serviceAccountName: harness-delegate-sa
+      imagePullSecrets:
+        - name: ecr-secret
+      containers:
+      - name: delegate
+        image: harness/delegate:latest
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 8080
+        env:
+        - name: JAVA_OPTS
+          value: "-Xms64M -Xmx{{ delegate_memory_limit }}"
+        - name: ACCOUNT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: harness-delegate-config
+              key: ACCOUNT_ID
+        - name: DELEGATE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: harness-delegate-token
+              key: DELEGATE_TOKEN
+        - name: MANAGER_HOST_AND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: harness-delegate-config
+              key: MANAGER_HOST_AND_PORT
+        - name: DELEGATE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: DELEGATE_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: DELEGATE_TYPE
+          value: "KUBERNETES"
+        - name: DELEGATE_TAGS
+          valueFrom:
+            configMapKeyRef:
+              name: harness-delegate-config
+              key: DELEGATE_TAGS
+        - name: DELEGATE_ORG_IDENTIFIER
+          valueFrom:
+            configMapKeyRef:
+              name: harness-delegate-config
+              key: DELEGATE_ORG_IDENTIFIER
+        - name: PROXY_MANAGER
+          value: "true"
+        - name: INIT_SCRIPT
+          value: |
+            echo "Starting Harness Delegate"
+            # Additional initialization if needed
+        - name: POLL_FOR_TASKS
+          value: "false"
+        - name: DELEGATE_DESCRIPTION
+          valueFrom:
+            configMapKeyRef:
+              name: harness-delegate-config
+              key: DELEGATE_DESCRIPTION
+        resources:
+          requests:
+            memory: "{{ delegate_memory_request }}"
+            cpu: "{{ delegate_cpu_request }}"
+          limits:
+            memory: "{{ delegate_memory_limit }}"
+            cpu: "{{ delegate_cpu_limit }}"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          failureThreshold: 3
+---
+# Service for delegate
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ delegate_name }}-service
+  namespace: {{ delegate_namespace }}
+spec:
+  selector:
+    harness.io/name: {{ delegate_name }}
+  ports:
+    - port: 8080
+      targetPort: 8080

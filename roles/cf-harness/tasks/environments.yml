@@ -1,0 +1,59 @@
+---
+# Create environments in both projects
+- name: Create environments in both projects
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.environments }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier={{ item[0] }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      environment:
+        name: "{{ item[1].name }}"
+        identifier: "{{ item[1].identifier }}"
+        description: "{{ item[1].description }}"
+        type: "{{ item[1].type }}"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "{{ item[0] }}"
+        tags:
+          environment_type: "{{ item[1].type | lower }}"
+          managed_by: "ansible"
+          cluster: "{{ rosa_cluster_name }}"
+    status_code: [200, 201, 400]
+  loop: "{{ ['cf_monitor', 'cf_app'] | product(environments) | list }}"
+  register: environment_creation
+
+- name: Create infrastructure definitions for each environment in both projects
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.infrastructures }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier={{ item[0] }}"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      infrastructure:
+        name: "{{ item[1].identifier }}-rosa-infrastructure"
+        identifier: "{{ item[1].identifier }}_rosa_infrastructure"
+        description: "ROSA infrastructure for {{ item[1].name }} environment"
+        environmentRef: "{{ item[1].identifier }}"
+        type: "KubernetesDirect"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "{{ item[0] }}"
+        spec:
+          connectorRef: "rosa_cluster_connector"
+          namespace: "{{ item[0] | replace('_', '-') }}-{{ item[1].identifier }}"
+          releaseName: "{{ item[0] | replace('_', '-') }}"
+        allowSimultaneousDeployments: false
+        tags:
+          environment: "{{ item[1].identifier }}"
+          managed_by: "ansible"
+          cluster: "{{ rosa_cluster_name }}"
+    status_code: [200, 201, 400]
+  loop: "{{ ['cf_monitor', 'cf_app'] | product(environments) | list }}"
+  register: infrastructure_creation
+
+- name: Display environment and infrastructure creation status
+  debug:
+    msg: "Created environments and infrastructure definitions for both cf_monitor and cf_app projects"

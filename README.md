@@ -1,5 +1,115 @@
 # ROSA Infrastructure Ansible Automation
 
+## 🏷️ ROSA Cluster Install & DB Cluster Install Tags
+
+### **🚀 ROSA Cluster Install Tags:**
+
+**Main Playbook (`main.yml`):**
+```bash
+# Available tags for ROSA cluster install
+--tags aws              # AWS setup and configuration
+--tags setup            # Initial setup tasks
+--tags rosa             # ROSA CLI installation
+--tags validation       # Pre-checks and validation
+--tags pre-checks       # Same as validation
+--tags cluster          # ROSA cluster creation
+--tags rosa-cluster     # Same as cluster
+```
+
+**Cluster Role Specific Tags:**
+```bash
+--tags cluster-create   # Create ROSA cluster tasks
+--tags cluster-delete   # Delete existing cluster (if needed)
+```
+
+### **🗄️ DB Cluster Install Tags:**
+
+**Main Playbook (`main.yml`):**
+```bash
+# Available tags for Aurora DB install
+--tags cf-db           # All CF database tasks
+--tags database        # Same as cf-db
+--tags aurora          # Aurora-specific tasks
+--tags postgresql      # PostgreSQL-specific tasks
+```
+
+**DB Role Specific Tags:**
+```bash
+--tags always          # Always run tasks (config loading)
+--tags cf-db           # All CF database operations
+--tags aurora          # Aurora cluster creation and management
+```
+
+### **📋 Usage Examples:**
+
+#### **🚀 ROSA Cluster Install:**
+```bash
+cd /Users/swaroop/SIDKS/ansible
+
+# Complete ROSA cluster setup
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags cluster
+
+# Just AWS setup and validation
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "aws,validation"
+
+# ROSA CLI + cluster creation
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "rosa,cluster"
+
+# Full setup (AWS + ROSA + Cluster)
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "aws,rosa,cluster"
+```
+
+#### **🗄️ Aurora DB Install:**
+```bash
+cd /Users/swaroop/SIDKS/ansible
+
+# Complete Aurora DB setup
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags cf-db
+
+# Just Aurora cluster tasks
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags aurora
+
+# Database + PostgreSQL specific
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "database,postgresql"
+```
+
+#### **🔧 CF Deployment:**
+```bash
+# CF microservices deployment
+ansible-playbook playbooks/cf-deployment.yml -e target_environment=dev --tags cf-deployment
+
+# Just microservices
+ansible-playbook playbooks/cf-deployment.yml -e target_environment=dev --tags microservices
+```
+
+### **🎯 Complete Install Workflow:**
+
+```bash
+# 1. Install ROSA cluster
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "aws,rosa,cluster"
+
+# 2. Install Aurora DB
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "cf-db,aurora"
+
+# 3. Deploy CF microservices
+ansible-playbook playbooks/cf-deployment.yml -e target_environment=dev --tags cf-deployment
+
+# Or run everything together
+ansible-playbook playbooks/main.yml -e target_environment=dev -e aws_profile=sid-KS --tags "cluster,cf-db"
+```
+
+### **📊 Tag Summary:**
+
+| Component | Main Tags | Specific Tags |
+|-----------|-----------|---------------|
+| **ROSA Cluster** | `cluster`, `rosa-cluster` | `cluster-create`, `aws`, `rosa`, `validation` |
+| **Aurora DB** | `cf-db`, `database`, `aurora` | `postgresql`, `always` |
+| **CF Deployment** | `cf-deployment` | `microservices` |
+
+**Use these tags to run specific installation phases without running the entire playbook!** 🚀
+
+---
+
 ## 🚀 Overview
 
 This repository contains comprehensive Ansible automation for deploying and managing Red Hat OpenShift Service on AWS (ROSA) infrastructure with complete microservices deployment capabilities. The automation covers the entire lifecycle from AWS setup, ROSA cluster provisioning, database infrastructure, monitoring stack, to full microservices deployment using Helm charts.

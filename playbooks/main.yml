@@ -1,15 +1,17 @@
 - name: ROSA Infrastructure Setup
   hosts: localhost
   connection: local
-  gather_facts: yes
+  gather_facts: "{{ false if 'nw-connectivity' in ansible_run_tags or 'connectivity-test' in ansible_run_tags else true }}"
 
   vars_files:
     - "../environments/{{ target_environment | default('dev') }}/{{ target_environment | default('dev') }}.yml"
+    - "../environments/{{ target_environment | default('dev') }}/harness-setup.yml"
 
   pre_tasks:
     - name: Display playbook start
       debug:
         msg: "Starting ROSA infrastructure setup process for {{ target_environment | default('dev') }} environment"
+      when: "'nw-connectivity' not in ansible_run_tags and 'connectivity-test' not in ansible_run_tags"
 
   roles:
     - role: aws-setup
@@ -28,8 +30,13 @@
       tags: ['cf-db', 'database', 'aurora', 'postgresql']
 #    - role: cf-deployment
 #      tags: ['cf-deployment', 'microservices', 'deployment']
+    - role: cf-harness
+      tags: ['cf-harness', 'harness', 'cicd', 'deployment-pipeline']
+      vars:
+        env: "{{ target_environment | default('dev') }}"
 
   post_tasks:
     - name: Display playbook completion
       debug:
         msg: "ROSA infrastructure setup completed successfully"
+      when: "'nw-connectivity' not in ansible_run_tags and 'connectivity-test' not in ansible_run_tags"

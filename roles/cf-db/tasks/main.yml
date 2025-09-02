@@ -23,6 +23,15 @@
     - cf-db
     - validation
 
+# User Input for ROSA Cluster Details (Cross-Region VPC Peering)
+- name: Collect ROSA cluster information for VPC peering
+  include_tasks: user_input_rosa.yml
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
 - name: Display CF-DB role execution summary
   debug:
     msg:
@@ -67,6 +76,16 @@
     - aurora
     - database
     - db-cluster
+
+# ===== NETWORK CONNECTIVITY TESTING =====
+- name: Test database connectivity from ROSA cluster
+  include_tasks: nw_connectivity.yml
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+    - database-test
 
 # ===== CLEANUP TASKS (Separate execution only) =====
 - name: Cleanup Aurora DB and network resources

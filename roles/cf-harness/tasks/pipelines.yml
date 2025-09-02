@@ -1,0 +1,289 @@
+---
+# Pipeline for cf_monitor project - Fixed to use proper Harness NG structure
+- name: Create cf-monitor deployment pipeline in cf_monitor project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.pipelines }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      pipeline:
+        name: "cf-monitor-deployment"
+        identifier: "cf_monitor_deployment"
+        description: "Deployment pipeline for cf-monitor service"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_monitor"
+        stages:
+          - stage:
+              name: "Deploy to Development"
+              identifier: "deploy_to_dev"
+              type: "Deployment"
+              spec:
+                deploymentType: "Kubernetes"
+                services:
+                  values:
+                    - serviceRef: "cf_monitor"
+                  metadata:
+                    parallel: false
+                environment:
+                  environmentRef: "development"
+                  deployToAll: false
+                  infrastructureDefinitions:
+                    - identifier: "development_rosa_infrastructure"
+                execution:
+                  steps:
+                    - step:
+                        name: "Deploy cf-monitor"
+                        identifier: "deploy_cf_monitor"
+                        type: "HelmDeploy"
+                        timeout: "{{ pipeline_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+                          skipDryRun: false
+                    - step:
+                        name: "Health Check"
+                        identifier: "health_check"
+                        type: "Http"
+                        timeout: "{{ health_check_timeout }}"
+                        spec:
+                          url: "http://cf-monitor.cf-monitor-development:8080/actuator/health"
+                          method: "GET"
+                          assertion: "<+httpResponseCode> == 200"
+                  rollbackSteps:
+                    - step:
+                        name: "Helm Rollback"
+                        identifier: "helm_rollback"
+                        type: "HelmRollback"
+                        timeout: "{{ rollback_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+              tags:
+                environment: "development"
+              failureStrategies:
+                - onFailure:
+                    errors:
+                      - AllErrors
+                    action:
+                      type: StageRollback
+          - stage:
+              name: "Deploy to Production"
+              identifier: "deploy_to_prod"
+              type: "Deployment"
+              spec:
+                deploymentType: "Kubernetes"
+                services:
+                  values:
+                    - serviceRef: "cf_monitor"
+                  metadata:
+                    parallel: false
+                environment:
+                  environmentRef: "production"
+                  deployToAll: false
+                  infrastructureDefinitions:
+                    - identifier: "production_rosa_infrastructure"
+                execution:
+                  steps:
+                    - step:
+                        name: "Manual Approval"
+                        identifier: "approval"
+                        type: "HarnessApproval"
+                        timeout: "1d"
+                        spec:
+                          approvalMessage: "Approve deployment to production?"
+                          includePipelineExecutionHistory: true
+                          approvers:
+                            minimumCount: 1
+                            disallowPipelineExecutor: false
+                            userGroups:
+                              - "_project_all_users"
+                    - step:
+                        name: "Deploy cf-monitor"
+                        identifier: "deploy_cf_monitor_prod"
+                        type: "HelmDeploy"
+                        timeout: "{{ pipeline_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+                          skipDryRun: false
+                  rollbackSteps:
+                    - step:
+                        name: "Helm Rollback"
+                        identifier: "helm_rollback_prod"
+                        type: "HelmRollback"
+                        timeout: "{{ rollback_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+              when:
+                pipelineStatus: "Success"
+              failureStrategies:
+                - onFailure:
+                    errors:
+                      - AllErrors
+                    action:
+                      type: StageRollback
+        tags:
+          application: "cf-monitor"
+          managed_by: "ansible"
+    status_code: [200, 201, 400]
+  register: cf_monitor_pipeline
+
+# Pipeline for cf_app project - Fixed to use proper service deployment
+- name: Create cf-app deployment pipeline in cf_app project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.pipelines }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      pipeline:
+        name: "cf-app-deployment"
+        identifier: "cf_app_deployment"
+        description: "Deployment pipeline for Consulting Firm application services"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_app"
+        stages:
+          - stage:
+              name: "Deploy Infrastructure Services"
+              identifier: "deploy_infra_services"
+              type: "Deployment"
+              spec:
+                deploymentType: "Kubernetes"
+                services:
+                  values:
+                    - serviceRef: "config_server"
+                    - serviceRef: "naming_server"
+                  metadata:
+                    parallel: false
+                environment:
+                  environmentRef: "development"
+                  deployToAll: false
+                  infrastructureDefinitions:
+                    - identifier: "development_rosa_infrastructure"
+                execution:
+                  steps:
+                    - step:
+                        name: "Deploy Config Server"
+                        identifier: "deploy_config_server"
+                        type: "HelmDeploy"
+                        timeout: "{{ pipeline_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+                          skipDryRun: false
+                    - step:
+                        name: "Wait for Config Server"
+                        identifier: "wait_config_server"
+                        type: "ShellScript"
+                        timeout: "5m"
+                        spec:
+                          shell: "Bash"
+                          onDelegate: true
+                          source:
+                            type: "Inline"
+                            spec:
+                              script: |
+                                kubectl wait --for=condition=ready pod -l app=config-server -n cf-app-development --timeout=300s
+                    - step:
+                        name: "Deploy Naming Server"
+                        identifier: "deploy_naming_server"
+                        type: "HelmDeploy"
+                        timeout: "{{ pipeline_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+                          skipDryRun: false
+              failureStrategies:
+                - onFailure:
+                    errors:
+                      - AllErrors
+                    action:
+                      type: StageRollback
+          - stage:
+              name: "Deploy Business Services"
+              identifier: "deploy_business_services"
+              type: "Deployment"
+              spec:
+                deploymentType: "Kubernetes"
+                services:
+                  values:
+                    - serviceRef: "api_gateway"
+                    - serviceRef: "bench_profile"
+                    - serviceRef: "excel_service"
+                    - serviceRef: "daily_submissions"
+                    - serviceRef: "placements"
+                    - serviceRef: "interviews"
+                  metadata:
+                    parallel: true
+                environment:
+                  environmentRef: "development"
+                  deployToAll: false
+                  infrastructureDefinitions:
+                    - identifier: "development_rosa_infrastructure"
+                execution:
+                  steps:
+                    - step:
+                        name: "Deploy Business Services"
+                        identifier: "deploy_business_services"
+                        type: "HelmDeploy"
+                        timeout: "{{ pipeline_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+                          skipDryRun: false
+              when:
+                pipelineStatus: "Success"
+              failureStrategies:
+                - onFailure:
+                    errors:
+                      - AllErrors
+                    action:
+                      type: StageRollback
+          - stage:
+              name: "Deploy Frontend"
+              identifier: "deploy_frontend"
+              type: "Deployment"
+              spec:
+                deploymentType: "Kubernetes"
+                service:
+                  serviceRef: "frontend"
+                environment:
+                  environmentRef: "development"
+                  deployToAll: false
+                  infrastructureDefinitions:
+                    - identifier: "development_rosa_infrastructure"
+                execution:
+                  steps:
+                    - step:
+                        name: "Deploy Frontend"
+                        identifier: "deploy_frontend_step"
+                        type: "HelmDeploy"
+                        timeout: "{{ pipeline_timeout }}"
+                        spec:
+                          helmVersion: "V3"
+                          skipDryRun: false
+                    - step:
+                        name: "Verify Application"
+                        identifier: "verify_app"
+                        type: "Http"
+                        timeout: "5m"
+                        spec:
+                          url: "http://frontend.cf-app-development:3000"
+                          method: "GET"
+                          assertion: "<+httpResponseCode> == 200"
+              when:
+                pipelineStatus: "Success"
+              failureStrategies:
+                - onFailure:
+                    errors:
+                      - AllErrors
+                    action:
+                      type: StageRollback
+        tags:
+          application: "cf-app"
+          managed_by: "ansible"
+    status_code: [200, 201, 400]
+  register: cf_app_pipeline
+
+- name: Display pipeline creation status
+  debug:
+    msg: "Created pipelines: cf-monitor-deployment in cf_monitor project and cf-app-deployment in cf_app project"

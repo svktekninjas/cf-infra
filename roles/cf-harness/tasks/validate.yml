@@ -1,0 +1,73 @@
+---
+# Enhanced validation for Harness setup
+- name: Validate required Harness variables
+  assert:
+    that:
+      - harness_account_id is defined and harness_account_id != ""
+      - harness_org_id is defined and harness_org_id != ""
+      - harness_api_token is defined and harness_api_token != ""
+      - harness_delegate_token is defined and harness_delegate_token != ""
+      - rosa_cluster_name is defined and rosa_cluster_name != ""
+    fail_msg: "Required Harness variables are not defined. Please check harness-setup.yml"
+    success_msg: "All required Harness variables are defined"
+
+- name: Validate required GitHub variables
+  assert:
+    that:
+      - github_token is defined and github_token != ""
+      - github_username is defined and github_username != ""
+      - cf_monitor_repo_url is defined and cf_monitor_repo_url != ""
+      - cf_deploy_repo_url is defined and cf_deploy_repo_url != ""
+    fail_msg: "Required GitHub variables are not defined"
+    success_msg: "All required GitHub variables are defined"
+
+- name: Validate AWS variables
+  assert:
+    that:
+      - aws_account_id is defined and aws_account_id != ""
+      - ecr_region is defined and ecr_region != ""
+    fail_msg: "Required AWS variables are not defined"
+    success_msg: "All required AWS variables are defined"
+
+- name: Validate Helm configuration
+  assert:
+    that:
+      - cf_monitor_helm_path is defined and cf_monitor_helm_path != ""
+      - cf_deploy_helm_path is defined and cf_deploy_helm_path != ""
+      - helm_version is defined and helm_version in ["V2", "V3"]
+    fail_msg: "Helm configuration is invalid"
+    success_msg: "Helm configuration is valid"
+
+- name: Check Kubernetes cluster connectivity
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+  register: cluster_nodes
+  failed_when: false
+  ignore_errors: true
+
+- name: Display cluster information
+  debug:
+    msg: "{{ 'Connected to ROSA cluster with ' + (cluster_nodes.resources | length | string) + ' nodes' if cluster_nodes.resources is defined else 'Kubernetes cluster not accessible - will be validated during delegate deployment' }}"
+
+- name: Test Harness API connectivity
+  uri:
+    url: "{{ harness_base_url }}/gateway/ng/api/accounts/{{ harness_account_id }}"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  register: harness_api_test
+
+- name: Display validation summary
+  debug:
+    msg:
+      - "✅ Harness Account: {{ harness_account_id }}"
+      - "✅ Organization: {{ harness_org_id }}"
+      - "✅ ROSA Cluster: {{ rosa_cluster_name }}"
+      - "✅ AWS Account: {{ aws_account_id }}"
+      - "✅ ECR Region: {{ ecr_region }}"
+      - "✅ GitHub User: {{ github_username }}"
+      - "✅ Cluster Nodes: {{ cluster_nodes.resources | length if cluster_nodes.resources is defined else 'Not connected' }}"
+      - "✅ Harness API: Connected"

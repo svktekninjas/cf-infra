@@ -1,0 +1,145 @@
+---
+# Service for cf_monitor project - Fixed to use HelmChart
+- name: Create cf-monitor service in cf_monitor project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.services }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      service:
+        name: "cf-monitor"
+        identifier: "cf_monitor"
+        description: "Monitoring service deployed via Helm from cf-monitor repository"
+        serviceDefinition:
+          type: "Kubernetes"
+          spec:
+            manifests:
+              - manifest:
+                  identifier: "cf_monitor_helm"
+                  type: "HelmChart"
+                  spec:
+                    store:
+                      type: "Github"
+                      spec:
+                        connectorRef: "cf_monitor_git_connector"
+                        gitFetchType: "Branch"
+                        paths:
+                          - "{{ cf_monitor_helm_path }}"
+                        branch: "{{ git_branch }}"
+                    chartName: "cf-monitor"
+                    chartVersion: "<+input>"
+                    helmVersion: "V3"
+                    valuesPaths:
+                      - "{{ cf_monitor_helm_path }}/values.yaml"
+                    skipResourceVersioning: false
+            artifacts:
+              primary:
+                primaryArtifactRef: "<+input>"
+                sources:
+                  - identifier: "cf_monitor_image"
+                    type: "Ecr"
+                    spec:
+                      connectorRef: "aws_ecr_connector"
+                      imagePath: "{{ cf_monitor_image_path }}"
+                      tag: "<+input>"
+                      region: "{{ ecr_region }}"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_monitor"
+        tags:
+          application: "cf-monitor"
+          managed_by: "ansible"
+          repository: "cf-monitor"
+    status_code: [200, 201, 400]
+  register: cf_monitor_service
+
+# Services for cf_app project - Fixed to use HelmChart
+- name: Create cf-deploy services in cf_app project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.services }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      service:
+        name: "{{ item.name }}"
+        identifier: "{{ item.identifier }}"
+        description: "{{ item.description }}"
+        serviceDefinition:
+          type: "Kubernetes"
+          spec:
+            manifests:
+              - manifest:
+                  identifier: "{{ item.identifier }}_helm"
+                  type: "HelmChart"
+                  spec:
+                    store:
+                      type: "Github"
+                      spec:
+                        connectorRef: "cf_deploy_git_connector"
+                        gitFetchType: "Branch"
+                        paths:
+                          - "{{ cf_deploy_helm_path }}/{{ item.identifier }}"
+                        branch: "{{ git_branch }}"
+                    chartName: "{{ item.identifier }}"
+                    chartVersion: "<+input>"
+                    helmVersion: "V3"
+                    valuesPaths:
+                      - "{{ cf_deploy_helm_path }}/{{ item.identifier }}/values.yaml"
+                    skipResourceVersioning: false
+            artifacts:
+              primary:
+                primaryArtifactRef: "<+input>"
+                sources:
+                  - identifier: "{{ item.identifier }}_image"
+                    type: "Ecr"
+                    spec:
+                      connectorRef: "aws_ecr_connector"
+                      imagePath: "consultingfirm/{{ item.identifier }}"
+                      tag: "<+input>"
+                      region: "{{ ecr_region }}"
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_app"
+        tags:
+          application: "cf-app"
+          service: "{{ item.identifier }}"
+          managed_by: "ansible"
+          repository: "cf-deploy"
+    status_code: [200, 201, 400]
+  loop:
+    - name: "API Gateway"
+      identifier: "api_gateway"
+      description: "API Gateway service for Consulting Firm application"
+    - name: "Naming Server"
+      identifier: "naming_server"  
+      description: "Service discovery (Eureka) for Consulting Firm microservices"
+    - name: "Config Server"
+      identifier: "config_server"
+      description: "Configuration server for Consulting Firm microservices"
+    - name: "Bench Profile Service"
+      identifier: "bench_profile"
+      description: "Bench Profile management service"
+    - name: "Excel Service"
+      identifier: "excel_service"
+      description: "Excel processing service"
+    - name: "Daily Submissions"
+      identifier: "daily_submissions"
+      description: "Daily submissions tracking service"
+    - name: "Placements Service"
+      identifier: "placements"
+      description: "Placements management service"
+    - name: "Interviews Service"
+      identifier: "interviews"
+      description: "Interview scheduling and tracking service"
+    - name: "Frontend Application"
+      identifier: "frontend"
+      description: "React frontend application"
+  register: cf_app_services
+
+- name: Display services creation status
+  debug:
+    msg: "Created services: cf-monitor in cf_monitor project, and application services in cf_app project"

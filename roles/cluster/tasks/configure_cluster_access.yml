@@ -20,6 +20,8 @@
       --mode {{ mode }} \
       --yes
   register: operator_roles_result
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
   tags:
     - cluster
     - cluster-config
@@ -74,16 +76,56 @@
     - cluster-config
     - admin-user
 
-- name: "Create cluster admin user"
+- name: "Prompt for cluster admin password"
+  pause:
+    prompt: "Please enter a password for the cluster admin user (minimum 8 characters, required)"
+    echo: no
+  register: admin_password_input
+  when:
+    - create_admin_user | default(true)
+    - admin_exists_check.stdout == "not-exists"
+    - admin_password is not defined or admin_password == ""
+  tags:
+    - cluster
+    - cluster-config
+    - admin-user
+
+- name: "Set admin password from user input or external variable"
+  set_fact:
+    final_admin_password: "{{ admin_password | default(admin_password_input.user_input) }}"
+  when:
+    - create_admin_user | default(true)
+    - admin_exists_check.stdout == "not-exists"
+  tags:
+    - cluster
+    - cluster-config
+    - admin-user
+
+- name: "Validate admin password is provided"
+  fail:
+    msg: "Admin password is required. Please provide it via -e admin_password='your_password' or respond to the prompt."
+  when:
+    - create_admin_user | default(true)
+    - admin_exists_check.stdout == "not-exists"
+    - (final_admin_password is not defined or final_admin_password == "")
+  tags:
+    - cluster
+    - cluster-config
+    - admin-user
+
+- name: "Create cluster admin user with provided password"
   shell: |
     rosa create admin \
-      --cluster {{ full_cluster_name }}
+      --cluster {{ full_cluster_name }} \
+      --password {{ final_admin_password }}
   register: admin_user_result
   environment:
     AWS_PROFILE: "{{ aws_profile | default('default') }}"
   when:
     - create_admin_user | default(true)
     - admin_exists_check.stdout == "not-exists"
+    - final_admin_password is defined
+    - final_admin_password != ""
   tags:
     - cluster
     - cluster-config
@@ -100,15 +142,15 @@
     - cluster-config
     - admin-user
 
-- name: "Extract admin credentials"
+- name: "Set admin credentials"
   set_fact:
-    admin_username: "{{ admin_user_result.stdout | regex_search('--username ([^ ]+)', '\\1') | first | default('cluster-admin') }}"
-    admin_password: "{{ admin_user_result.stdout | regex_search('--password ([^ ]+)', '\\1') | first | default('') }}"
+    admin_username: "cluster-admin"
+    admin_password: "{{ final_admin_password }}"
   when:
     - create_admin_user | default(true)
     - admin_user_result is defined
     - admin_user_result.changed
-    - admin_exists_check.stdout == "not-exists"
+    - final_admin_password is defined
   tags:
     - cluster
     - cluster-config

@@ -1,0 +1,170 @@
+---
+# User Input Tasks for ROSA Cluster Details (Fallback when auto-discovery fails)
+
+- name: Display auto-discovery failure message
+  debug:
+    msg:
+      - "=== ROSA Auto-Discovery Failed ==="
+      - "Could not automatically discover ROSA cluster resources in us-east-1"
+      - "Searched for VPCs with tag '{{ rosa_discovery_tag_key | default('app-dev') }}={{ rosa_discovery_tag_value | default('rosa-cluster-dev') }}'"
+      - "Also tried Name tag containing 'rosa' and CIDR 10.0.0.0/16"
+      - ""
+      - "💡 To enable auto-discovery, you can provide tag values:"
+      - "   -e rosa_tag_key=app-dev -e rosa_tag_value=rosa-cluster-dev"
+      - ""
+      - "Please provide ROSA cluster details manually:"
+      - "=================================="
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Prompt for ROSA VPC ID
+  pause:
+    prompt: |
+      
+      Enter the ROSA VPC ID (e.g., vpc-0123456789abcdef0):
+      You can find this by running:
+      aws ec2 describe-vpcs --region us-east-1 --query 'Vpcs[*].[VpcId,CidrBlock,Tags[?Key==`Name`].Value|[0]]' --output table
+  register: rosa_vpc_input
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Validate ROSA VPC ID format
+  fail:
+    msg: "Invalid VPC ID format. Expected format: vpc-xxxxxxxxx"
+  when:
+    - rosa_vpc_input.user_input == "" or not (rosa_vpc_input.user_input | regex_search('^vpc-[a-f0-9]{8,17}$'))
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Set ROSA VPC ID
+  set_fact:
+    rosa_vpc_id: "{{ rosa_vpc_input.user_input }}"
+    rosa_cluster_region: "us-east-1"
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Auto-fetch ROSA VPC CIDR using provided VPC ID
+  shell: |
+    aws ec2 describe-vpcs \
+      --region us-east-1 \
+      --vpc-ids {{ rosa_vpc_id }} \
+      --query 'Vpcs[0].CidrBlock' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: rosa_vpc_cidr_fetch
+  failed_when: rosa_vpc_cidr_fetch.rc != 0
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Set ROSA VPC CIDR from auto-fetch
+  set_fact:
+    rosa_vpc_cidr: "{{ rosa_vpc_cidr_fetch.stdout }}"
+  when: rosa_vpc_cidr_fetch.stdout != "None" and rosa_vpc_cidr_fetch.stdout != ""
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Prompt for ROSA VPC CIDR if auto-fetch failed
+  pause:
+    prompt: |
+      
+      Could not automatically fetch VPC CIDR for {{ rosa_vpc_id }}.
+      Please enter the ROSA VPC CIDR block (e.g., 10.0.0.0/16):
+  register: rosa_vpc_cidr_input
+  when: rosa_vpc_cidr is not defined or rosa_vpc_cidr == "None" or rosa_vpc_cidr == ""
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Set ROSA VPC CIDR from user input
+  set_fact:
+    rosa_vpc_cidr: "{{ rosa_vpc_cidr_input.user_input }}"
+  when: 
+    - rosa_vpc_cidr_input is defined
+    - rosa_vpc_cidr_input.user_input is defined
+    - rosa_vpc_cidr_input.user_input != ""
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Auto-discover ROSA route table using provided VPC ID
+  shell: |
+    aws ec2 describe-route-tables \
+      --region us-east-1 \
+      --filters "Name=vpc-id,Values={{ rosa_vpc_id }}" "Name=association.main,Values=false" \
+      --query 'RouteTables[?Routes[?NatGatewayId!=null]]|[0].RouteTableId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: rosa_route_table_fetch
+  failed_when: false
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Set ROSA route table from auto-discovery
+  set_fact:
+    rosa_route_table_id: "{{ rosa_route_table_fetch.stdout }}"
+  when: 
+    - rosa_route_table_fetch.stdout != "None" 
+    - rosa_route_table_fetch.stdout != ""
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Set default route table if auto-discovery fails
+  set_fact:
+    rosa_route_table_id: "skip"
+  when: 
+    - rosa_route_table_id is not defined or rosa_route_table_id == "None" or rosa_route_table_id == ""
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Display collected ROSA information
+  debug:
+    msg:
+      - "=== ROSA Information Collected ==="
+      - "ROSA Region: us-east-1"
+      - "ROSA VPC ID: {{ rosa_vpc_id }}"
+      - "ROSA VPC CIDR: {{ rosa_vpc_cidr }}"
+      - "ROSA Route Table ID: {{ rosa_route_table_id }}"
+      - "================================="
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering
+
+- name: Validate collected ROSA information
+  assert:
+    that:
+      - rosa_vpc_id is defined and rosa_vpc_id != "" and rosa_vpc_id != "None"
+      - rosa_vpc_cidr is defined and rosa_vpc_cidr != "" and rosa_vpc_cidr != "None"
+      - rosa_route_table_id is defined and rosa_route_table_id != "" and rosa_route_table_id != "None"
+    fail_msg: |
+      Incomplete ROSA cluster information:
+      - VPC ID: {{ rosa_vpc_id | default('MISSING') }}
+      - VPC CIDR: {{ rosa_vpc_cidr | default('MISSING') }}
+      - Route Table ID: {{ rosa_route_table_id | default('MISSING') }}
+    success_msg: "All required ROSA cluster information collected successfully"
+  tags:
+    - cf-db
+    - user-input
+    - vpc-peering

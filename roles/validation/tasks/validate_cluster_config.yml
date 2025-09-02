@@ -7,7 +7,7 @@
 - name: "Validate cluster name format (alphanumeric and hyphens only)"
   assert:
     that:
-      - full_cluster_name | regex_search('^[a-z0-9-]+$')
+      - full_cluster_name | regex_search('^[a-z0-9-]+$') != None
       - full_cluster_name | length <= 54
     fail_msg: "❌ Invalid cluster name: {{ full_cluster_name }}. Must be alphanumeric with hyphens only and ≤54 characters"
     success_msg: "✅ Cluster name valid: {{ full_cluster_name }}"
@@ -15,7 +15,7 @@
 - name: "Validate OpenShift version format"
   assert:
     that:
-      - openshift_version | regex_search('^4\.[0-9]+$')
+      - openshift_version | regex_search('^4\.[0-9]+$') != None
     fail_msg: "❌ Invalid OpenShift version: {{ openshift_version }}. Must be in format 4.x"
     success_msg: "✅ OpenShift version valid: {{ openshift_version }}"
 

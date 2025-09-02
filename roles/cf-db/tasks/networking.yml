@@ -378,14 +378,14 @@
     - cf-db
     - networking
 
-# ===== VPC PEERING MANAGEMENT (CROSS-REGION: US-WEST-1 ↔ US-EAST-1) =====
-# Dynamic discovery of ROSA cluster resources using tags
+# ===== VPC PEERING MANAGEMENT (CROSS-REGION) =====
+# First attempt auto-discovery, then fall back to user input if needed
 
-- name: Discover ROSA VPC in us-east-1 using tags
+- name: Attempt to discover ROSA VPC in us-east-1 using ROSA tag
   shell: |
     aws ec2 describe-vpcs \
       --region us-east-1 \
-      --filters "Name=tag:red-hat-clustertype,Values=rosa" "Name=state,Values=available" \
+      --filters "Name=tag:Name,Values=*ROSA*" "Name=state,Values=available" \
       --query 'Vpcs[0].VpcId' \
       --output text
   environment:
@@ -398,7 +398,7 @@
     - networking
     - vpc-peering
 
-- name: Get ROSA VPC CIDR block
+- name: Attempt to get ROSA VPC CIDR block
   shell: |
     aws ec2 describe-vpcs \
       --region us-east-1 \
@@ -417,7 +417,7 @@
     - networking
     - vpc-peering
 
-- name: Discover ROSA private route table in us-east-1
+- name: Attempt to discover ROSA private route table in us-east-1
   shell: |
     aws ec2 describe-route-tables \
       --region us-east-1 \
@@ -436,42 +436,95 @@
     - networking
     - vpc-peering
 
-- name: Set discovered ROSA facts
+- name: Check if ROSA resources were discovered successfully
   set_fact:
-    rosa_vpc_id: "{{ rosa_vpc_discovery.stdout }}"
-    rosa_vpc_cidr: "{{ rosa_vpc_cidr_discovery.stdout }}"
-    rosa_route_table_id: "{{ rosa_route_table_discovery.stdout }}"
-  when:
-    - cf_db_config.vpc_peering.enabled | default(false)
-    - rosa_vpc_discovery.stdout != "None" and rosa_vpc_discovery.stdout != ""
-  tags:
-    - cf-db
-    - networking
-    - vpc-peering
-
-- name: Display discovered ROSA resources
-  debug:
-    msg:
-      - "=== Discovered ROSA Resources ==="
-      - "ROSA VPC ID: {{ rosa_vpc_id | default('Not found') }}"
-      - "ROSA VPC CIDR: {{ rosa_vpc_cidr | default('Not found') }}"
-      - "ROSA Route Table: {{ rosa_route_table_id | default('Not found') }}"
-      - "Aurora VPC ID: {{ cf_db_vpc_id }}"
-      - "Aurora VPC CIDR: {{ cf_db_config.vpc_cidr }}"
-      - "==============================="
+    rosa_discovery_successful: "{{ 
+      (rosa_vpc_discovery.stdout is defined and rosa_vpc_discovery.stdout != 'None' and rosa_vpc_discovery.stdout != '') and
+      (rosa_vpc_cidr_discovery.stdout is defined and rosa_vpc_cidr_discovery.stdout != 'None' and rosa_vpc_cidr_discovery.stdout != '') and
+      (rosa_route_table_discovery.stdout is defined and rosa_route_table_discovery.stdout != 'None' and rosa_route_table_discovery.stdout != '')
+    }}"
   when: cf_db_config.vpc_peering.enabled | default(false)
   tags:
     - cf-db
     - networking
     - vpc-peering
 
-- name: Validate ROSA resource discovery
+- name: Set discovered ROSA facts if discovery was successful
+  set_fact:
+    rosa_cluster_region: "us-east-1"
+    rosa_vpc_id: "{{ rosa_vpc_discovery.stdout }}"
+    rosa_vpc_cidr: "{{ rosa_vpc_cidr_discovery.stdout }}"
+    rosa_route_table_id: "{{ rosa_route_table_discovery.stdout }}"
+  when:
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - rosa_discovery_successful | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Display auto-discovery results
+  debug:
+    msg:
+      - "=== ROSA Auto-Discovery Results ==="
+      - "Discovery Status: {{ 'SUCCESS' if rosa_discovery_successful | default(false) else 'FAILED' }}"
+      - "ROSA VPC ID: {{ rosa_vpc_discovery.stdout | default('Not found') }}"
+      - "ROSA VPC CIDR: {{ rosa_vpc_cidr_discovery.stdout | default('Not found') }}"
+      - "ROSA Route Table: {{ rosa_route_table_discovery.stdout | default('Not found') }}"
+      - "=================================="
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Collect ROSA information interactively if auto-discovery failed
+  include_tasks: user_input_rosa.yml
+  when:
+    - cf_db_config.vpc_peering.enabled | default(false)
+    - not (rosa_discovery_successful | default(false))
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+    - user-input
+
+- name: Display final ROSA cluster information
+  debug:
+    msg:
+      - "=== Final ROSA Cluster Information ==="
+      - "Source: {{ 'Auto-Discovery' if rosa_discovery_successful | default(false) else 'User Input' }}"
+      - "ROSA Region: {{ rosa_cluster_region | default('Not available') }}"
+      - "ROSA VPC ID: {{ rosa_vpc_id | default('Not available') }}"
+      - "ROSA VPC CIDR: {{ rosa_vpc_cidr | default('Not available') }}"
+      - "ROSA Route Table ID: {{ rosa_route_table_id | default('Not available') }}"
+      - ""
+      - "Aurora Database Region: {{ cf_db_config.region }}"
+      - "Aurora VPC ID: {{ cf_db_vpc_id }}"
+      - "Aurora VPC CIDR: {{ cf_db_config.vpc_cidr }}"
+      - "====================================="
+  when: cf_db_config.vpc_peering.enabled | default(false)
+  tags:
+    - cf-db
+    - networking
+    - vpc-peering
+
+- name: Validate final ROSA cluster information
   assert:
     that:
+      - rosa_cluster_region is defined and rosa_cluster_region != ""
       - rosa_vpc_id is defined and rosa_vpc_id != "None" and rosa_vpc_id != ""
+      - rosa_vpc_cidr is defined and rosa_vpc_cidr != "None" and rosa_vpc_cidr != ""
       - rosa_route_table_id is defined and rosa_route_table_id != "None" and rosa_route_table_id != ""
-    fail_msg: "ROSA VPC or route table not found. Ensure ROSA cluster exists in us-east-1 with proper tags."
-    success_msg: "ROSA resources discovered successfully: VPC {{ rosa_vpc_id }}, Route Table {{ rosa_route_table_id }}"
+    fail_msg: |
+      ROSA cluster information is incomplete. Cannot proceed with VPC peering.
+      Missing: {{ 
+        (['ROSA Region'] if not (rosa_cluster_region is defined and rosa_cluster_region != '') else []) +
+        (['ROSA VPC ID'] if not (rosa_vpc_id is defined and rosa_vpc_id != 'None' and rosa_vpc_id != '') else []) +
+        (['ROSA VPC CIDR'] if not (rosa_vpc_cidr is defined and rosa_vpc_cidr != 'None' and rosa_vpc_cidr != '') else []) +
+        (['ROSA Route Table ID'] if not (rosa_route_table_id is defined and rosa_route_table_id != 'None' and rosa_route_table_id != '') else [])
+      }}
+    success_msg: "ROSA cluster information validated successfully for cross-region VPC peering"
   when: cf_db_config.vpc_peering.enabled | default(false)
   tags:
     - cf-db

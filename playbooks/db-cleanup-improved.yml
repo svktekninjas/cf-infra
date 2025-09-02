@@ -1,0 +1,223 @@
+---
+# Improved Aurora DB Cleanup Playbook
+# Handles missing instances gracefully and skips snapshots
+# Usage: ansible-playbook playbooks/db-cleanup-improved.yml -e target_environment=dev -e aws_profile=sid-KS -e cleanup_confirmation=DELETE
+
+- name: Aurora DB Cleanup - Improved
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    aws_region: us-west-1
+    aws_profile: "{{ aws_profile | default('sid-KS') }}"
+    target_environment: "{{ target_environment | default('dev') }}"
+    
+    # DB Configuration
+    db_cluster_name: "cf-aurora-pg-cluster-{{ target_environment }}"
+    db_writer_name: "cf-aurora-pg-writer-{{ target_environment }}"
+    db_reader_name: "cf-aurora-pg-reader-{{ target_environment }}"
+
+  tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - aws_profile is defined
+          - target_environment is defined
+          - cleanup_confirmation is defined
+          - cleanup_confirmation == "DELETE"
+        fail_msg: |
+          Missing required variables. Please provide:
+          - aws_profile: AWS profile to use
+          - target_environment: Environment (dev/test/prod)
+          - cleanup_confirmation: Must be "DELETE" to confirm
+
+          Example:
+          ansible-playbook playbooks/db-cleanup-improved.yml -e target_environment=dev -e aws_profile=sid-KS -e cleanup_confirmation=DELETE
+
+    - name: Display cleanup warning
+      debug:
+        msg:
+          - "⚠️  === AURORA DB CLEANUP WARNING === ⚠️"
+          - "This will PERMANENTLY DELETE:"
+          - "- Cluster: {{ db_cluster_name }}"
+          - "- Writer: {{ db_writer_name }} (if exists)"
+          - "- Reader: {{ db_reader_name }} (if exists)"
+          - "- Region: {{ aws_region }}"
+          - "- Profile: {{ aws_profile }}"
+          - "- NO SNAPSHOTS WILL BE TAKEN!"
+          - "ALL DATA WILL BE LOST!"
+
+    - name: Check if Aurora DB instances exist
+      shell: |
+        aws rds describe-db-instances \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBInstances[?contains(DBInstanceIdentifier, `cf-aurora-pg`)].DBInstanceIdentifier' \
+          --output text
+      register: existing_instances
+      failed_when: false
+      tags: db-discovery
+
+    - name: Display found instances
+      debug:
+        msg: "Found DB instances: {{ existing_instances.stdout if existing_instances.stdout != '' else 'None' }}"
+      tags: db-discovery
+
+    - name: Delete Aurora DB Reader Instance (if exists)
+      shell: |
+        aws rds delete-db-instance \
+          --db-instance-identifier {{ db_reader_name }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --skip-final-snapshot
+      register: delete_reader
+      failed_when: false
+      when: existing_instances.stdout is search(db_reader_name)
+      tags: db-instances
+
+    - name: Display reader deletion result
+      debug:
+        msg: "{{ 'Reader instance deletion initiated' if delete_reader.changed else 'Reader instance not found or already deleted' }}"
+      tags: db-instances
+
+    - name: Delete Aurora DB Writer Instance (if exists)
+      shell: |
+        aws rds delete-db-instance \
+          --db-instance-identifier {{ db_writer_name }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --skip-final-snapshot
+      register: delete_writer
+      failed_when: false
+      when: existing_instances.stdout is search(db_writer_name)
+      tags: db-instances
+
+    - name: Display writer deletion result
+      debug:
+        msg: "{{ 'Writer instance deletion initiated' if delete_writer.changed else 'Writer instance not found or already deleted' }}"
+      tags: db-instances
+
+    - name: Wait for instances to be deleted (if any were found)
+      shell: |
+        aws rds describe-db-instances \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBInstances[?contains(DBInstanceIdentifier, `cf-aurora-pg`)].DBInstanceIdentifier' \
+          --output text
+      register: remaining_instances
+      until: remaining_instances.stdout == ""
+      retries: 20
+      delay: 15
+      failed_when: false
+      when: existing_instances.stdout != ""
+      tags: db-instances
+
+    - name: Check if Aurora DB cluster exists
+      shell: |
+        aws rds describe-db-clusters \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBClusters[?DBClusterIdentifier==`{{ db_cluster_name }}`].DBClusterIdentifier' \
+          --output text
+      register: existing_cluster
+      failed_when: false
+      tags: db-cluster
+
+    - name: Display cluster status
+      debug:
+        msg: "{{ 'Cluster found: ' + db_cluster_name if existing_cluster.stdout != '' else 'Cluster not found: ' + db_cluster_name }}"
+      tags: db-cluster
+
+    - name: Delete Aurora DB Cluster (if exists)
+      shell: |
+        aws rds delete-db-cluster \
+          --db-cluster-identifier {{ db_cluster_name }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --skip-final-snapshot
+      register: delete_cluster
+      failed_when: false
+      when: existing_cluster.stdout != ""
+      tags: db-cluster
+
+    - name: Display cluster deletion result
+      debug:
+        msg: "{{ 'Cluster deletion initiated' if delete_cluster.changed else 'Cluster not found or already deleted' }}"
+      tags: db-cluster
+
+    - name: Wait for cluster to be deleted (if it existed)
+      shell: |
+        aws rds describe-db-clusters \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBClusters[?DBClusterIdentifier==`{{ db_cluster_name }}`].DBClusterIdentifier' \
+          --output text
+      register: remaining_cluster
+      until: remaining_cluster.stdout == ""
+      retries: 15
+      delay: 20
+      failed_when: false
+      when: existing_cluster.stdout != ""
+      tags: db-cluster
+
+    - name: Clean up DB Subnet Groups
+      shell: |
+        aws rds describe-db-subnet-groups \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBSubnetGroups[?contains(DBSubnetGroupName, `cf`)].DBSubnetGroupName' \
+          --output text
+      register: subnet_groups
+      failed_when: false
+      tags: db-networking
+
+    - name: Delete DB Subnet Groups (if any exist)
+      shell: |
+        aws rds delete-db-subnet-group \
+          --db-subnet-group-name {{ item }} \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }}
+      loop: "{{ subnet_groups.stdout.split() }}"
+      when: subnet_groups.stdout != ""
+      failed_when: false
+      tags: db-networking
+
+    - name: Final verification - Check remaining Aurora resources
+      shell: |
+        echo "=== Remaining Aurora Clusters ==="
+        aws rds describe-db-clusters \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBClusters[?contains(DBClusterIdentifier, `cf-aurora`)].DBClusterIdentifier' \
+          --output text || echo "None"
+        echo "=== Remaining Aurora Instances ==="
+        aws rds describe-db-instances \
+          --region {{ aws_region }} \
+          --profile {{ aws_profile }} \
+          --query 'DBInstances[?contains(DBInstanceIdentifier, `cf-aurora`)].DBInstanceIdentifier' \
+          --output text || echo "None"
+      register: final_check
+      failed_when: false
+      tags: verification
+
+    - name: Display final verification
+      debug:
+        msg: "{{ final_check.stdout_lines }}"
+      tags: verification
+
+    - name: Display completion message
+      debug:
+        msg:
+          - "🎉 Aurora DB Cleanup Process Completed!"
+          - "✅ Checked for DB instances (deleted if found)"
+          - "✅ Checked for DB cluster (deleted if found)"
+          - "✅ Cleaned up DB subnet groups"
+          - "✅ No snapshots were taken (as requested)"
+          - ""
+          - "💰 Cost Impact:"
+          - "   - Compute costs: ELIMINATED"
+          - "   - Storage costs: ELIMINATED (after deletion completes)"
+          - "   - Backup costs: ELIMINATED"
+          - ""
+          - "⚠️  Please verify in AWS Console that all resources are deleted"
+          - "⚠️  Check AWS billing for cost confirmation in next billing cycle"

@@ -1,0 +1,6 @@
+---
+- import_playbook: harness-setup.yml
+  when: setup_harness | default(false) | bool
+
+- import_playbook: other-workloads.yml
+  when: setup_other_workloads | default(false) | bool

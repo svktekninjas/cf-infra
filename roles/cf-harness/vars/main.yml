@@ -1,85 +1,78 @@
 ---
-# Main variables for cf-harness role
-# These variables override defaults and can be set per environment
+# Internal role variables - not meant to be overridden
+harness_api_endpoints:
+  delegates: "/gateway/ng/api/download-delegates/docker"
+  connectors: "/gateway/ng/api/connectors"
+  environments: "/gateway/ng/api/environmentsV2"
+  infrastructures: "/gateway/ng/api/infrastructures"
+  services: "/gateway/ng/api/servicesV2"
+  pipelines: "/gateway/pipeline/api/pipelines/v2"
+  triggers: "/gateway/pipeline/api/triggers"
+  secrets: "/gateway/ng/api/v2/secrets"
 
-# Harness Account Credentials (should be in vault)
-harness_account_id: "{{ vault_harness_account_id | default('') }}"
-harness_api_key: "{{ vault_harness_api_key | default('') }}"
-harness_delegate_token: "{{ vault_harness_delegate_token | default('') }}"
+# Connector types mapping
+connector_types:
+  git: "Github"
+  ecr: "DockerRegistry"
+  k8s: "K8sCluster"
+  aws: "Aws"
 
-# AWS Credentials (should be in vault)
-aws_access_key_ref: "{{ vault_aws_access_key_ref | default('aws_access_key') }}"
-aws_secret_key_ref: "{{ vault_aws_secret_key_ref | default('aws_secret_key') }}"
+# Service definition types
+service_types:
+  kubernetes: "Kubernetes"
+  helm: "HelmChart"
 
-# ROSA Cluster Details
-rosa_cluster_url: "{{ vault_rosa_cluster_url | default('') }}"
-rosa_service_account_token_ref: "{{ vault_rosa_sa_token_ref | default('rosa_sa_token') }}"
-rosa_oidc_provider: "{{ vault_rosa_oidc_provider | default('') }}"
+# Deployment types
+deployment_types:
+  kubernetes: "Kubernetes"
+  helm: "Helm"
 
-# GitHub Credentials (should be in vault)
-github_username: "{{ vault_github_username | default('') }}"
-github_token_ref: "{{ vault_github_token_ref | default('github_pat') }}"
+# Trigger types
+trigger_types:
+  webhook: "Webhook"
+  github: "Github"
+  pullrequest: "PullRequest"
 
-# ECR Repository Configuration
-ecr_repositories:
-  - "consultingfirm/naming-server-service"
-  - "consultingfirm/api-gateway-service"
-  - "consultingfirm/config-service"
-  - "consultingfirm/spring-boot-admin-service"
-  - "consultingfirm/common-excel-service"
-  - "consultingfirm/bench-profile-service"
-  - "consultingfirm/daily-submissions-service"
-  - "consultingfirm/interviews-service"
-  - "consultingfirm/placements-service"
-  - "consultingfirm/frontend-service"
+# Pipeline stage types
+stage_types:
+  deployment: "Deployment"
+  approval: "Approval"
+  custom: "Custom"
 
-# Image Tags
-image_tags:
-  naming_server: "latest"
-  api_gateway: "latest"
-  spring_boot_admin: "latest"
-  config_service: "latest"
-  excel_service: "latest"
-  bench_profile: "latest"
-  daily_submissions: "latest"
-  interviews: "latest"
-  placements: "latest"
-  frontend: "latest"
+# Step types
+step_types:
+  helm_deploy: "HelmDeploy"
+  helm_rollback: "HelmRollback"
+  k8s_deploy: "K8sRollingDeploy"
+  k8s_bluegreen: "K8sBlueGreenDeploy"
+  health_check: "Http"
 
-# Helm Chart Configuration
-helm_chart_version: "1.0.0"
-helm_values_path: "environments/{{ environment }}/deployment-values.yaml"
+# Authentication types
+auth_types:
+  username_token: "UsernameToken"
+  username_password: "UsernamePassword"
+  inherit_delegate: "InheritFromDelegate"
+  service_account: "ServiceAccount"
 
-# Network Configuration
-enable_network_policies: true
-allowed_namespaces:
-  - "cf-monitor"
-  - "cf-app"
-  - "cf-{{ environment }}"
-  - "harness-delegate-ng"
+# Git fetch types
+git_fetch_types:
+  branch: "Branch"
+  commit: "Commit"
+  tag: "Tag"
 
-# RBAC Configuration
-cluster_roles:
-  - name: "harness-delegate-cluster-role"
-    rules:
-      - apiGroups: ["*"]
-        resources: ["*"]
-        verbs: ["*"]
-  - name: "ecr-sa-role"
-    rules:
-      - apiGroups: [""]
-        resources: ["secrets", "configmaps"]
-        verbs: ["get", "list", "create", "update", "patch"]
-      - apiGroups: ["apps"]
-        resources: ["deployments", "replicasets"]
-        verbs: ["get", "list"]
+# Artifact types
+artifact_types:
+  docker: "DockerRegistry"
+  ecr: "Ecr"
+  gcr: "Gcr"
 
-# Monitoring Configuration
-enable_monitoring: true
-prometheus_namespace: "cf-monitor"
-grafana_namespace: "cf-monitor"
+# Environment types
+environment_types:
+  production: "Production"
+  preproduction: "PreProduction"
 
-# Logging Configuration
-enable_logging: true
-log_level: "INFO"
-log_retention_days: 30
+# Infrastructure types
+infrastructure_types:
+  k8s_direct: "KubernetesDirect"
+  k8s_gcp: "KubernetesGcp"
+  k8s_aws: "KubernetesAws"

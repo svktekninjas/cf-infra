@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecr-credentials-sync
+  namespace: cf-app
+  labels:
+    app.kubernetes.io/name: ecr-credentials-sync
+    app.kubernetes.io/component: apiComponent
+    app.kubernetes.io/instance: apiservice
+    app.kubernetes.io/version: "1.0"
+  annotations:
+    app.kubernetes.io/owner: consultingFirm
+    app.kubernetes.io/version: "1.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecr-credentials-sync
+  template:
+    metadata:
+      labels:
+        app: ecr-credentials-sync
+        app.kubernetes.io/name: ecr-credentials-sync
+        app.kubernetes.io/component: apiComponent
+        app.kubernetes.io/instance: apiservice
+        app.kubernetes.io/version: "1.0"
+      annotations:
+        app.kubernetes.io/owner: consultingFirm
+        app.kubernetes.io/version: "1.0"
+    spec:
+      serviceAccountName: ecr-sa
+      securityContext:
+        runAsNonRoot: true
+      containers:
+      - name: ecr-sync
+        image: amazon/aws-cli:latest
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        command:
+        - /bin/sh
+        - -ce
+        - |
+          # Create writable AWS config directory
+          mkdir -p /tmp/.aws
+          export AWS_CONFIG_FILE=/tmp/.aws/config
+          export AWS_SHARED_CREDENTIALS_FILE=/tmp/.aws/credentials
+          
+          while true; do
+            CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+            echo "Starting ECR token refresh at [$CURRENT_TIME]"
+            
+            # ECR Initialization
+            aws ecr get-login-password --region ${REGION} > /token/ecr-token
+            
+            # Download OpenShift CLI
+            cd /tmp && /usr/bin/curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
+            python3 -c "import tarfile; import os; tar=tarfile.open('/tmp/openshift-client-linux.tar.gz', 'r:gz'); tar.extractall('/tmp'); tar.close(); os.system('chmod +x /tmp/oc')"
+            
+            # Create ECR secret
+            /tmp/oc create secret docker-registry regcred \
+               --dry-run=client \
+               --docker-server="818140567777.dkr.ecr.us-east-1.amazonaws.com" \
+               --docker-username=AWS \
+               --docker-password="$(cat /token/ecr-token)" \
+               -o yaml | /tmp/oc apply -f -
+          
+            echo "Successfully created ECR secret at [$CURRENT_TIME]"
+          
+            # Sleep for 6 hours before next refresh
+            sleep 6h
+          done
+        env:
+        - name: REGION
+          value: us-east-1
+        - name: HOME
+          value: /tmp
+        - name: AWS_CONFIG_FILE
+          value: /tmp/.aws/config
+        - name: AWS_SHARED_CREDENTIALS_FILE
+          value: /tmp/.aws/credentials
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1G
+          limits:
+            cpu: 1
+            memory: 2G
+        volumeMounts:
+        - name: token
+          mountPath: /token
+      volumes:
+      - name: token
+        emptyDir:
+          medium: Memory
+      restartPolicy: Always

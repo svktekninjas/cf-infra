@@ -4,6 +4,12 @@
 # Enables cross-VPC database connectivity for microservices
 # Tags: ansible-playbook -t nw-connectivity (individual task)
 #       ansible-playbook -t cf-db (full role including this task)
+#
+# USAGE:
+# ansible-playbook playbooks/main.yml --tags nw-connectivity \
+#   -e "target_environment=dev" \
+#   -e "aws_profile=sid-KS" \
+#   -e "aurora_vpc_id=vpc-072aeb8530950071b"
 
 - name: Load role variables for VPC peering
   include_vars: "{{ role_path }}/vars/main.yml"
@@ -12,7 +18,97 @@
     - cf-db
     - nw-connectivity
 
-- name: Discover ROSA cluster VPC in us-east-1
+- name: Set default ROSA discovery tag
+  set_fact:
+    rosa_discovery_tag_key: "{{ rosa_tag_key | default('app-dev') }}"
+    rosa_discovery_tag_value: "{{ rosa_tag_value | default('rosa-cluster-dev') }}"
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Validate required Aurora VPC ID parameter
+  assert:
+    that:
+      - aurora_vpc_id is defined
+      - aurora_vpc_id != ""
+      - aurora_vpc_id is match("^vpc-[0-9a-f]{8,17}$")
+    fail_msg: |
+      ❌ AURORA VPC ID REQUIRED ❌
+      
+      The Aurora VPC ID must be provided as a parameter.
+      
+      Usage:
+      ansible-playbook playbooks/main.yml --tags nw-connectivity \
+        -e "target_environment=dev" \
+        -e "aws_profile=sid-KS" \
+        -e "aurora_vpc_id=vpc-072aeb8530950071b"
+      
+      To find your Aurora VPC ID, run:
+      aws ec2 describe-vpcs --region us-west-1 --profile {{ aws_profile | default('sid-KS') }} \
+        --query 'Vpcs[*].[VpcId,CidrBlock,Tags[?Key==`Name`].Value|[0]]' --output table
+    success_msg: "✅ Aurora VPC ID validated: {{ aurora_vpc_id }}"
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Get Aurora VPC CIDR from provided VPC ID
+  shell: |
+    aws ec2 describe-vpcs \
+      --region {{ cf_db_config.region }} \
+      --vpc-ids {{ aurora_vpc_id }} \
+      --query 'Vpcs[0].CidrBlock' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: aurora_vpc_cidr_lookup
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Set Aurora VPC facts
+  set_fact:
+    aurora_vpc_cidr: "{{ aurora_vpc_cidr_lookup.stdout }}"
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Display Aurora VPC information
+  debug:
+    msg:
+      - "✅ AURORA VPC INFORMATION"
+      - "========================"
+      - "VPC ID: {{ aurora_vpc_id }}"
+      - "VPC CIDR: {{ aurora_vpc_cidr }}"
+      - "Region: {{ cf_db_config.region }}"
+      - ""
+      - "🚀 Proceeding with ROSA discovery and connectivity testing..."
+      - "========================"
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+# ===== ROSA DISCOVERY =====
+
+- name: Discover ROSA cluster VPC using app-dev tag
+  shell: |
+    aws ec2 describe-vpcs \
+      --region us-east-1 \
+      --filters "Name=tag:{{ rosa_discovery_tag_key }},Values={{ rosa_discovery_tag_value }}" \
+      --query 'Vpcs[0].[VpcId,CidrBlock]' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: rosa_vpc_discovery
+  failed_when: false
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Discover ROSA cluster VPC (fallback - Name tag search)
   shell: |
     aws ec2 describe-vpcs \
       --region us-east-1 \
@@ -20,14 +116,15 @@
       --query 'Vpcs[0].[VpcId,CidrBlock]' \
       --output text
   environment:
-    AWS_PROFILE: "{{ cf_db_config.profile }}"
-  register: rosa_vpc_discovery
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
+  register: rosa_vpc_discovery_name
   failed_when: false
+  when: rosa_vpc_discovery.stdout == "None\tNone" or rosa_vpc_discovery.rc != 0
   tags:
     - cf-db
     - nw-connectivity
 
-- name: Discover ROSA cluster VPC (alternative search)
+- name: Discover ROSA cluster VPC (fallback - CIDR search)
   shell: |
     aws ec2 describe-vpcs \
       --region us-east-1 \
@@ -35,26 +132,65 @@
       --query 'Vpcs[0].[VpcId,CidrBlock]' \
       --output text
   environment:
-    AWS_PROFILE: "{{ cf_db_config.profile }}"
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
   register: rosa_vpc_discovery_alt
   failed_when: false
-  when: rosa_vpc_discovery.stdout == "None\tNone" or rosa_vpc_discovery.rc != 0
+  when: 
+    - rosa_vpc_discovery.stdout == "None\tNone" or rosa_vpc_discovery.rc != 0
+    - rosa_vpc_discovery_name.stdout == "None\tNone" or rosa_vpc_discovery_name.rc != 0
   tags:
     - cf-db
     - nw-connectivity
 
-- name: Set discovered ROSA VPC facts
+- name: Parse ROSA VPC ID from discovery result
   set_fact:
-    discovered_rosa_vpc_id: "{{ (rosa_vpc_discovery.stdout.split('\t')[0] if rosa_vpc_discovery.stdout != 'None\tNone' else rosa_vpc_discovery_alt.stdout.split('\t')[0]) | default('') }}"
-    discovered_rosa_vpc_cidr: "{{ (rosa_vpc_discovery.stdout.split('\t')[1] if rosa_vpc_discovery.stdout != 'None\tNone' else rosa_vpc_discovery_alt.stdout.split('\t')[1]) | default('10.0.0.0/16') }}"
+    discovered_rosa_vpc_id: "{{ rosa_vpc_discovery.stdout.split('\t')[0] }}"
+    discovered_rosa_vpc_cidr: "{{ rosa_vpc_discovery.stdout.split('\t')[1] }}"
+  when: 
+    - rosa_vpc_discovery.stdout != "None\tNone" 
+    - rosa_vpc_discovery.rc == 0
   tags:
     - cf-db
     - nw-connectivity
 
-- name: Set Aurora VPC facts from current deployment
+- name: Parse ROSA VPC ID from name-based discovery (fallback)
   set_fact:
-    aurora_vpc_id: "{{ cf_db_config.vpc_id | default(cf_db_created_vpc_id) }}"
-    aurora_vpc_cidr: "{{ cf_db_config.vpc_cidr | default('172.31.0.0/16') }}"
+    discovered_rosa_vpc_id: "{{ rosa_vpc_discovery_name.stdout.split('\t')[0] }}"
+    discovered_rosa_vpc_cidr: "{{ rosa_vpc_discovery_name.stdout.split('\t')[1] }}"
+  when: 
+    - rosa_vpc_discovery_name is defined
+    - rosa_vpc_discovery_name is not skipped
+    - rosa_vpc_discovery_name.stdout is defined
+    - rosa_vpc_discovery_name.stdout != "None\tNone" 
+    - rosa_vpc_discovery_name.rc == 0
+    - discovered_rosa_vpc_id is not defined
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Parse ROSA VPC ID from CIDR-based discovery (fallback)
+  set_fact:
+    discovered_rosa_vpc_id: "{{ rosa_vpc_discovery_alt.stdout.split('\t')[0] }}"
+    discovered_rosa_vpc_cidr: "{{ rosa_vpc_discovery_alt.stdout.split('\t')[1] }}"
+  when: 
+    - rosa_vpc_discovery_alt is defined
+    - rosa_vpc_discovery_alt is not skipped
+    - rosa_vpc_discovery_alt.stdout is defined
+    - rosa_vpc_discovery_alt.stdout != "None\tNone" 
+    - rosa_vpc_discovery_alt.rc == 0
+    - discovered_rosa_vpc_id is not defined
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Set default values if no ROSA VPC found
+  set_fact:
+    discovered_rosa_vpc_id: ""
+    discovered_rosa_vpc_cidr: "10.0.0.0/16"
+  when: discovered_rosa_vpc_id is not defined
+  tags:
+    - cf-db
+    - nw-connectivity
   tags:
     - cf-db
     - nw-connectivity
@@ -78,7 +214,7 @@
     that:
       - aurora_vpc_id is defined and aurora_vpc_id != ""
       - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
-    fail_msg: "Dynamic VPC discovery failed. Aurora VPC: {{ aurora_vpc_id | default('not found') }}, ROSA VPC: {{ discovered_rosa_vpc_id | default('not found') }}"
+    fail_msg: "Dynamic VPC discovery failed. Aurora VPC: {{ aurora_vpc_id | default('Not provided') }}, ROSA VPC: {{ discovered_rosa_vpc_id | default('Not found') }}"
     success_msg: "Dynamic VPC peering configuration validated successfully."
   when: cf_db_config.vpc_peering.enabled | default(true)
   tags:
@@ -99,6 +235,51 @@
     - cf-db
     - nw-connectivity
 
+- name: Check for existing VPC peering connection
+  shell: |
+    aws ec2 describe-vpc-peering-connections \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=requester-vpc-info.vpc-id,Values={{ aurora_vpc_id }}" \
+               "Name=accepter-vpc-info.vpc-id,Values={{ discovered_rosa_vpc_id }}" \
+               "Name=status-code,Values=active,pending-acceptance" \
+      --query 'VpcPeeringConnections[0].VpcPeeringConnectionId' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: existing_peering_check
+  when:
+    - cf_db_config.vpc_peering.enabled | default(true)
+    - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
+  failed_when: false
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Set existing VPC peering connection ID
+  set_fact:
+    vpc_peering_connection_id: "{{ existing_peering_check.stdout }}"
+  when: 
+    - existing_peering_check is defined
+    - existing_peering_check.stdout is defined
+    - existing_peering_check.stdout != "None"
+    - existing_peering_check.stdout != ""
+  tags:
+    - cf-db
+    - nw-connectivity
+
+- name: Display existing VPC peering connection info
+  debug:
+    msg:
+      - "✅ Found existing VPC peering connection!"
+      - "🔗 Peering Connection ID: {{ vpc_peering_connection_id }}"
+      - "🌐 Aurora VPC: {{ aurora_vpc_id }} ({{ aurora_vpc_cidr }})"
+      - "🌐 ROSA VPC: {{ discovered_rosa_vpc_id }} ({{ discovered_rosa_vpc_cidr }})"
+      - "📊 Skipping peering creation, proceeding with connectivity testing..."
+  when: vpc_peering_connection_id is defined and vpc_peering_connection_id != ""
+  tags:
+    - cf-db
+    - nw-connectivity
+
 - name: Create VPC peering connection with discovered VPCs
   shell: |
     aws ec2 create-vpc-peering-connection \
@@ -113,16 +294,20 @@
   when:
     - cf_db_config.vpc_peering.enabled | default(true)
     - discovered_rosa_vpc_id is defined and discovered_rosa_vpc_id != ""
+    - vpc_peering_connection_id is not defined or vpc_peering_connection_id == ""
   environment:
     AWS_PROFILE: "{{ cf_db_config.profile }}"
   tags:
     - cf-db
     - nw-connectivity
 
-- name: Set VPC peering connection ID fact
+- name: Set new VPC peering connection ID fact
   set_fact:
     vpc_peering_connection_id: "{{ vpc_peering_connection_result.stdout }}"
-  when: vpc_peering_connection_result is defined and vpc_peering_connection_result.stdout is defined
+  when: 
+    - vpc_peering_connection_result is defined 
+    - vpc_peering_connection_result.stdout is defined
+    - vpc_peering_connection_id is not defined
   tags:
     - cf-db
     - nw-connectivity
@@ -195,6 +380,236 @@
     - cf-db
     - nw-connectivity
 
+# ===== DATABASE CONNECTIVITY TESTING =====
+- name: Get Aurora cluster endpoint for connectivity testing
+  shell: |
+    aws rds describe-db-clusters \
+      --region {{ cf_db_config.region }} \
+      --db-cluster-identifier {{ cf_db_config.database.cluster_name }} \
+      --query 'DBClusters[0].Endpoint' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: aurora_endpoint_for_test
+  when: vpc_peering_connection_id is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Set Aurora endpoint fact for testing
+  set_fact:
+    aurora_test_endpoint: "{{ aurora_endpoint_for_test.stdout }}"
+  when: 
+    - vpc_peering_connection_id is defined
+    - aurora_endpoint_for_test is defined
+    - aurora_endpoint_for_test.stdout is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Check if ROSA cluster is accessible for testing
+  shell: |
+    oc whoami --show-server 2>/dev/null || echo "not-connected"
+  register: rosa_cluster_check
+  failed_when: false
+  when: vpc_peering_connection_id is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Display connectivity test preparation
+  debug:
+    msg:
+      - "🧪 Preparing database connectivity test..."
+      - "Aurora Endpoint: {{ aurora_test_endpoint | default('N/A') }}"
+      - "Database Port: {{ cf_db_config.security_group.db_port }}"
+      - "ROSA Cluster: {{ 'Connected' if rosa_cluster_check.stdout != 'not-connected' else 'Not Connected' }}"
+      - "Test Method: {{ 'OpenShift Pod' if rosa_cluster_check.stdout != 'not-connected' else 'Local Network Test' }}"
+  when: vpc_peering_connection_id is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Create database connectivity test pod in ROSA cluster
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: aurora-connectivity-test
+        namespace: default
+        labels:
+          app: aurora-test
+          component: connectivity-test
+      spec:
+        restartPolicy: Never
+        containers:
+        - name: postgres-client
+          image: postgres:15-alpine
+          command: ["/bin/sh"]
+          args: ["-c", "sleep 300"]
+          env:
+          - name: PGHOST
+            value: "{{ aurora_test_endpoint | default('') }}"
+          - name: PGPORT
+            value: "{{ cf_db_config.security_group.db_port | string }}"
+          - name: PGUSER
+            value: "{{ cf_db_config.database.master_username }}"
+          - name: PGDATABASE
+            value: "{{ cf_db_config.database.database_name }}"
+          - name: PGPASSWORD
+            value: "{{ cf_db_config.database.master_password }}"
+    state: present
+    wait: true
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: 120
+  register: test_pod_creation
+  when: 
+    - vpc_peering_connection_id is defined
+    - rosa_cluster_check.stdout != 'not-connected'
+    - aurora_test_endpoint is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Wait for test pod to be ready
+  pause:
+    seconds: 10
+  when: 
+    - test_pod_creation is defined
+    - test_pod_creation.changed
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Test network connectivity to Aurora (telnet test)
+  kubernetes.core.k8s_exec:
+    namespace: default
+    pod: aurora-connectivity-test
+    command: |
+      timeout 10 sh -c 'echo > /dev/tcp/$PGHOST/$PGPORT' && echo "SUCCESS: Network connection established" || echo "FAILED: Cannot reach Aurora endpoint"
+  register: network_connectivity_test
+  failed_when: false
+  when: 
+    - test_pod_creation is defined
+    - test_pod_creation.changed
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Test PostgreSQL database connectivity
+  kubernetes.core.k8s_exec:
+    namespace: default
+    pod: aurora-connectivity-test
+    command: |
+      psql -h $PGHOST -p $PGPORT -U $PGUSER -d $PGDATABASE -c "SELECT 1 as connectivity_test, current_timestamp as test_time, version() as db_version;" -t
+  register: database_connectivity_test
+  failed_when: false
+  when: 
+    - test_pod_creation is defined
+    - test_pod_creation.changed
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Test Aurora cluster information query
+  kubernetes.core.k8s_exec:
+    namespace: default
+    pod: aurora-connectivity-test
+    command: |
+      psql -h $PGHOST -p $PGPORT -U $PGUSER -d $PGDATABASE -c "SELECT 
+        current_database() as database_name,
+        current_user as connected_user,
+        inet_server_addr() as server_ip,
+        inet_server_port() as server_port,
+        pg_is_in_recovery() as is_replica;" -t
+  register: aurora_info_test
+  failed_when: false
+  when: 
+    - test_pod_creation is defined
+    - test_pod_creation.changed
+    - database_connectivity_test is defined
+    - "'1' in database_connectivity_test.stdout"
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Cleanup connectivity test pod
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: Pod
+    name: aurora-connectivity-test
+    namespace: default
+    state: absent
+    wait: true
+    wait_timeout: 60
+  when: 
+    - test_pod_creation is defined
+    - test_pod_creation.changed
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+    - cleanup
+
+- name: Display database connectivity test results
+  debug:
+    msg:
+      - "🧪 Database Connectivity Test Results"
+      - "======================================"
+      - "Network Test: {{ 'PASSED ✅' if network_connectivity_test is defined and 'SUCCESS' in network_connectivity_test.stdout else 'FAILED ❌' }}"
+      - "Database Test: {{ 'PASSED ✅' if database_connectivity_test is defined and '1' in database_connectivity_test.stdout else 'FAILED ❌' }}"
+      - "{% if database_connectivity_test is defined and '1' in database_connectivity_test.stdout %}Database Response: {{ database_connectivity_test.stdout.strip() }}{% endif %}"
+      - "{% if aurora_info_test is defined and aurora_info_test.stdout %}Aurora Info: {{ aurora_info_test.stdout.strip() }}{% endif %}"
+      - "======================================"
+      - "{% if network_connectivity_test is defined and 'SUCCESS' in network_connectivity_test.stdout and database_connectivity_test is defined and '1' in database_connectivity_test.stdout %}✅ Cross-VPC database connectivity VERIFIED{% else %}❌ Connectivity issues detected - check security groups and VPC peering{% endif %}"
+  when: vpc_peering_connection_id is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Perform local network connectivity test (fallback)
+  shell: |
+    timeout 10 bash -c "</dev/tcp/{{ aurora_test_endpoint }}/{{ cf_db_config.security_group.db_port }}" 2>/dev/null && echo "SUCCESS: Network reachable from local machine" || echo "FAILED: Cannot reach Aurora from local machine"
+  register: local_network_test
+  failed_when: false
+  when: 
+    - vpc_peering_connection_id is defined
+    - rosa_cluster_check.stdout == 'not-connected'
+    - aurora_test_endpoint is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
+- name: Display local connectivity test results
+  debug:
+    msg:
+      - "🖥️  Local Network Test Results"
+      - "=============================="
+      - "Test Result: {{ local_network_test.stdout if local_network_test is defined else 'Skipped - ROSA cluster connected' }}"
+      - "Note: This tests from your local machine, not from ROSA cluster"
+      - "=============================="
+  when: 
+    - vpc_peering_connection_id is defined
+    - local_network_test is defined
+  tags:
+    - cf-db
+    - nw-connectivity
+    - connectivity-test
+
 - name: Display VPC peering completion summary
   debug:
     msg:
@@ -203,7 +618,7 @@
       - "🌐 Aurora VPC: {{ aurora_vpc_id }} ({{ aurora_vpc_cidr }})"
       - "🌐 ROSA VPC: {{ discovered_rosa_vpc_id | default('N/A') }} ({{ discovered_rosa_vpc_cidr | default('N/A') }})"
       - "📊 Cross-VPC connectivity enabled for database access"
-      - "🧪 Test connectivity: ping/telnet from ROSA pods to Aurora endpoints"
+      - "🧪 Connectivity Test: {{ 'COMPLETED' if (network_connectivity_test is defined or local_network_test is defined) else 'SKIPPED' }}"
   when: vpc_peering_connection_id is defined
   tags:
     - cf-db

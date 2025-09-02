@@ -1,0 +1,70 @@
+---
+# Connector Management - List, Delete, and Recreate Connectors
+- name: List all connectors in cf_monitor project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+    status_code: [200]
+  register: cf_monitor_connectors
+
+- name: List all connectors in cf_app project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+    status_code: [200]
+  register: cf_app_connectors
+
+- name: Display cf_monitor connectors
+  debug:
+    msg: |
+      CF_MONITOR Project Connectors:
+      {% for connector in cf_monitor_connectors.json.data.content %}
+      - {{ connector.connector.identifier }} ({{ connector.connector.name }}) - Type: {{ connector.connector.type }}
+      {% endfor %}
+
+- name: Display cf_app connectors
+  debug:
+    msg: |
+      CF_APP Project Connectors:
+      {% for connector in cf_app_connectors.json.data.content %}
+      - {{ connector.connector.identifier }} ({{ connector.connector.name }}) - Type: {{ connector.connector.type }}
+      {% endfor %}
+
+- name: Prompt for connector to delete
+  pause:
+    prompt: |
+      Enter connector identifier to delete (or 'skip' to skip deletion):
+      Available connectors:
+      CF_MONITOR: {% for c in cf_monitor_connectors.json.data.content %}{{ c.connector.identifier }} {% endfor %}
+      CF_APP: {% for c in cf_app_connectors.json.data.content %}{{ c.connector.identifier }} {% endfor %}
+  register: connector_to_delete
+  when: connector_action is not defined
+
+- name: Prompt for project selection
+  pause:
+    prompt: "Enter project (cf_monitor or cf_app):"
+  register: project_selection
+  when: connector_to_delete.user_input != 'skip' and project_name is not defined
+
+- name: Delete selected connector
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.connectors }}/{{ connector_to_delete.user_input }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier={{ project_selection.user_input | default(project_name) }}"
+    method: DELETE
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+    status_code: [200, 204, 404]
+  when: connector_to_delete.user_input != 'skip'
+  register: delete_result
+
+- name: Display deletion result
+  debug:
+    msg: "Connector {{ connector_to_delete.user_input }} deleted successfully"
+  when: connector_to_delete.user_input != 'skip' and delete_result.status in [200, 204]
+
+- name: Recreate connectors
+  include_tasks: connectors.yml
+  when: connector_to_delete.user_input != 'skip'

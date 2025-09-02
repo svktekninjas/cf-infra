@@ -40,6 +40,8 @@
   register: rosa_login_result
   no_log: true
   ignore_errors: true
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
   tags: rosa
 
 - name: Check if ROSA login was successful
@@ -52,6 +54,8 @@
   shell: "{{ rosa_cli_binary_name }} whoami"
   register: rosa_whoami_result
   changed_when: false
+  environment:
+    AWS_PROFILE: "{{ aws_profile | default('default') }}"
   tags: rosa
 
 - name: Display ROSA authentication status

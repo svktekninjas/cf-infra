@@ -1,78 +1,71 @@
 ---
-# Main tasks for cf-harness role
-# Supports both CLI and API methods (API recommended for full functionality)
-
-- name: Display role execution information
-  debug:
-    msg: |
-      Setting up Harness for environment: {{ environment }}
-      Method: {{ 'Harness CLI' if use_harness_cli | default(false) | bool else 'REST API (Recommended)' }}
+# Main task orchestration for Harness setup
+- name: Validate required variables
+  include_tasks: validate.yml
   tags:
+    - cf-harness
+    - validation
     - always
 
-# Option 1: Setup using Harness CLI (limited functionality)
-- name: Setup Harness CLI
-  include_tasks: check_harness_cli.yml
-  when: use_harness_cli | default(false) | bool
+- name: Create Harness projects
+  include_tasks: cf-harness-project.yml
   tags:
-    - cli
+    - cf-harness
+    - projects
     - setup
 
-# Option 2: Setup using REST API (full functionality - recommended)
-- name: Validate prerequisites
-  include_tasks: validate_prerequisites.yml
-  when: validate_prerequisites | default(true) | bool
+- name: Setup secrets in Harness
+  include_tasks: secrets.yml
   tags:
-    - validate
-    - prerequisites
+    - cf-harness
+    - secrets
+    - setup
 
-- name: Setup service accounts with IRSA
-  include_tasks: setup_service_accounts.yml
-  when: enable_irsa_configuration | default(true) | bool
+- name: Deploy Harness delegate to ROSA cluster
+  include_tasks: delegate.yml
   tags:
-    - serviceaccount
-    - irsa
-    - rbac
-
-- name: Install Harness Delegate
-  include_tasks: install_delegate.yml
-  when: enable_delegate_installation | default(true) | bool
-  tags:
+    - cf-harness
     - delegate
-    - install
+    - infrastructure
 
-# Use API versions for better functionality
-- name: Setup Harness connectors via API
-  include_tasks: "{{ 'setup_connectors.yml' if use_harness_cli | default(false) | bool else 'setup_connectors_api.yml' }}"
-  when: enable_connector_creation | default(true) | bool
+- name: Configure Harness connectors
+  include_tasks: connectors.yml
   tags:
+    - cf-harness
     - connectors
-    - setup
-    - api
+    - configuration
 
-- name: Apply Harness resources via API
-  include_tasks: "{{ 'apply_harness_resources.yml' if use_harness_cli | default(false) | bool else 'apply_harness_resources_api.yml' }}"
-  when: enable_service_creation | default(true) | bool
+- name: Setup environments and infrastructure
+  include_tasks: environments.yml
   tags:
-    - resources
+    - cf-harness
+    - environments
+    - infrastructure
+
+- name: Create Harness services
+  include_tasks: services.yml
+  tags:
+    - cf-harness
     - services
+    - configuration
+
+- name: Create deployment pipelines
+  include_tasks: pipelines.yml
+  tags:
+    - cf-harness
     - pipelines
-    - api
+    - deployment
 
-- name: Validate Harness setup via API
-  include_tasks: "{{ 'validate_installation.yml' if use_harness_cli | default(false) | bool else 'validate_installation_api.yml' }}"
+- name: Configure triggers
+  include_tasks: triggers.yml
   tags:
-    - validate
-    - test
-    - api
+    - cf-harness
+    - triggers
+    - automation
 
-- name: Display completion message
-  debug:
-    msg: |
-      Harness setup completed successfully!
-      - Delegate: {{ harness_delegate_name }}
-      - Namespace: {{ harness_delegate_namespace }}
-      - Environment: {{ environment }}
-      - Connectors created: AWS ECR, ROSA Cluster, GitHub
+- name: Verify setup
+  include_tasks: verify.yml
   tags:
-    - always
+    - cf-harness
+    - verification
+    - testing

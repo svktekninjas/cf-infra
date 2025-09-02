@@ -1,0 +1,127 @@
+---
+# Trigger for cf_monitor project
+- name: Create Git trigger for cf-monitor pipeline in cf_monitor project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.triggers }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      trigger:
+        name: "cf-monitor-git-trigger"
+        identifier: "cf_monitor_git_trigger"
+        description: "Git trigger for cf-monitor deployment pipeline"
+        enabled: true
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_monitor"
+        pipelineIdentifier: "cf_monitor_deployment"
+        targetIdentifier: "cf_monitor_deployment"
+        source:
+          type: "{{ trigger_types.webhook }}"
+          spec:
+            type: "{{ trigger_types.github }}"
+            spec:
+              type: "{{ trigger_types.pullrequest }}"
+              spec:
+                connectorRef: "cf_monitor_git_connector"
+                autoAbortPreviousExecutions: "{{ auto_abort_previous_executions }}"
+                payloadConditions:
+                  - key: "targetBranch"
+                    operator: "Equals"
+                    value: "{{ git_branch }}"
+                headerConditions: []
+                repoName: "cf-monitor"
+                actions:
+                  - "{{ git_trigger_events | first }}"
+        inputSetRefs:
+          - "<+trigger.branch>"
+        tags:
+          trigger_type: "git"
+          application: "cf-monitor"
+          managed_by: "ansible"
+    status_code: [200, 201, 400]
+  register: cf_monitor_trigger
+
+# Trigger for cf_app project
+- name: Create Git trigger for cf-app pipeline in cf_app project
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.triggers }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      trigger:
+        name: "cf-app-git-trigger"
+        identifier: "cf_app_git_trigger"
+        description: "Git trigger for cf-app deployment pipeline"
+        enabled: true
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_app"
+        pipelineIdentifier: "cf_app_deployment"
+        targetIdentifier: "cf_app_deployment"
+        source:
+          type: "{{ trigger_types.webhook }}"
+          spec:
+            type: "{{ trigger_types.github }}"
+            spec:
+              type: "{{ trigger_types.pullrequest }}"
+              spec:
+                connectorRef: "cf_deploy_git_connector"
+                autoAbortPreviousExecutions: "{{ auto_abort_previous_executions }}"
+                payloadConditions:
+                  - key: "targetBranch"
+                    operator: "Equals"
+                    value: "{{ git_branch }}"
+                headerConditions: []
+                repoName: "cf-deploy"
+                actions:
+                  - "{{ git_trigger_events | first }}"
+        inputSetRefs:
+          - "<+trigger.branch>"
+        tags:
+          trigger_type: "git"
+          application: "cf-app"
+          managed_by: "ansible"
+    status_code: [200, 201, 400]
+  register: cf_app_trigger
+
+# Scheduled trigger for cf_monitor nightly deployment
+- name: Create scheduled trigger for cf-monitor in cf_monitor project (nightly deployment)
+  uri:
+    url: "{{ harness_base_url }}{{ harness_api_endpoints.triggers }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: POST
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      trigger:
+        name: "cf-monitor-scheduled-trigger"
+        identifier: "cf_monitor_scheduled_trigger"
+        description: "Scheduled trigger for cf-monitor nightly deployment"
+        enabled: false
+        orgIdentifier: "{{ harness_org_id }}"
+        projectIdentifier: "cf_monitor"
+        pipelineIdentifier: "cf_monitor_deployment"
+        targetIdentifier: "cf_monitor_deployment"
+        source:
+          type: "Scheduled"
+          spec:
+            type: "Cron"
+            spec:
+              expression: "0 2 * * *"
+        inputSetRefs: []
+        tags:
+          trigger_type: "scheduled"
+          application: "cf-monitor"
+          managed_by: "ansible"
+    status_code: [200, 201, 400]
+  register: cf_monitor_scheduled_trigger
+
+- name: Display trigger creation status
+  debug:
+    msg: "Created triggers: Git triggers for both cf_monitor and cf_app projects, plus scheduled trigger for cf-monitor"

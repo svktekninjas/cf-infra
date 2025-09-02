@@ -1,0 +1,27 @@
+---
+- name: Setup Harness Platform for CF Workloads
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  
+  vars_files:
+    - "../environments/{{ env | default('dev') }}/harness-setup.yml"
+    - "../vault/{{ env | default('dev') }}/secrets.yml"
+  
+  pre_tasks:
+    - name: Validate environment parameter
+      assert:
+        that:
+          - env is defined
+          - env in ['dev', 'test', 'prod']
+        fail_msg: "Environment must be specified: -e env=[dev|test|prod]"
+    
+    - name: Check required tools
+      command: "{{ item }} --version"
+      loop: [kubectl, helm]
+      register: tool_check
+      failed_when: tool_check.rc != 0
+      changed_when: false
+  
+  roles:
+    - cf-harness

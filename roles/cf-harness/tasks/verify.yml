@@ -1,0 +1,85 @@
+---
+# Verify setup for cf_monitor project
+- name: Verify cf_monitor project setup
+  uri:
+    url: "{{ harness_base_url }}{{ item.endpoint }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_monitor"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  loop:
+    - { name: "Connectors", endpoint: "{{ harness_api_endpoints.connectors }}" }
+    - { name: "Services", endpoint: "{{ harness_api_endpoints.services }}" }
+    - { name: "Environments", endpoint: "{{ harness_api_endpoints.environments }}" }
+    - { name: "Pipelines", endpoint: "{{ harness_api_endpoints.pipelines }}" }
+    - { name: "Triggers", endpoint: "{{ harness_api_endpoints.triggers }}" }
+  register: cf_monitor_verification
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Display cf_monitor verification results
+  debug:
+    msg: "cf_monitor project - {{ item.item.name }}: {{ item.json.data | length if item.json.data is defined else 0 }} items"
+  loop: "{{ cf_monitor_verification.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# Verify setup for cf_app project
+- name: Verify cf_app project setup
+  uri:
+    url: "{{ harness_base_url }}{{ item.endpoint }}?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}&projectIdentifier=cf_app"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  loop:
+    - { name: "Connectors", endpoint: "{{ harness_api_endpoints.connectors }}" }
+    - { name: "Services", endpoint: "{{ harness_api_endpoints.services }}" }
+    - { name: "Environments", endpoint: "{{ harness_api_endpoints.environments }}" }
+    - { name: "Pipelines", endpoint: "{{ harness_api_endpoints.pipelines }}" }
+    - { name: "Triggers", endpoint: "{{ harness_api_endpoints.triggers }}" }
+  register: cf_app_verification
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Display cf_app verification results
+  debug:
+    msg: "cf_app project - {{ item.item.name }}: {{ item.json.data | length if item.json.data is defined else 0 }} items"
+  loop: "{{ cf_app_verification.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# Verify delegate connectivity
+- name: Check delegate status
+  uri:
+    url: "{{ harness_base_url }}/gateway/ng/api/delegates/status?accountIdentifier={{ harness_account_id }}&orgIdentifier={{ harness_org_id }}"
+    method: GET
+    headers:
+      x-api-key: "{{ harness_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  register: delegate_check
+
+- name: Display delegate status
+  debug:
+    msg: >
+      Delegate '{{ delegate_name }}' status: 
+      {{ (delegate_check.json.data | selectattr('name', 'equalto', delegate_name) | first).status 
+         if delegate_check.json.data | selectattr('name', 'equalto', delegate_name) | list | length > 0 
+         else 'NOT FOUND' }}
+
+# Generate verification report
+- name: Generate verification report
+  template:
+    src: verification_report.j2
+    dest: "/tmp/harness-verification-report-{{ ansible_date_time.epoch }}.txt"
+  vars:
+    cf_monitor_results: "{{ cf_monitor_verification.results }}"
+    cf_app_results: "{{ cf_app_verification.results }}"
+    delegate_status: "{{ delegate_check.json }}"
+
+- name: Display verification report path
+  debug:
+    msg: "Verification report saved to: /tmp/harness-verification-report-{{ ansible_date_time.epoch }}.txt"

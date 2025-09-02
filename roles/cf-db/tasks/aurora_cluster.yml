@@ -381,6 +381,111 @@
     - aurora
     - database
 
+# ===== INSTANCE WAIT LOGIC =====
+- name: Check if any instances are still creating
+  shell: |
+    aws rds describe-db-instances \
+      --region {{ cf_db_config.region }} \
+      --filters "Name=db-cluster-id,Values={{ cf_db_config.database.cluster_name }}" \
+      --query 'DBInstances[?DBInstanceStatus==`creating`].[DBInstanceIdentifier,DBInstanceStatus]' \
+      --output text
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: creating_instances_check
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Display instance creation wait instructions
+  pause:
+    prompt: |
+      ⏳ AURORA INSTANCES CREATION IN PROGRESS ⏳
+      ==========================================
+      Cluster: {{ cf_db_config.database.cluster_name }}
+      Creating Instances: {{ creating_instances_check.stdout_lines | length }}
+      Region: {{ cf_db_config.region }}
+
+      Aurora instance creation typically takes 10-15 minutes.
+
+      You have two options:
+      1. Press 'C' + Enter to continue waiting (will check status every 1 minute)
+      2. Press Ctrl+C to abort and re-run later with:
+         ansible-playbook playbooks/main.yml --tags aurora -e "target_environment=dev" -e "aws_profile=sid-KS"
+
+      The playbook will automatically check instance status and continue when ready.
+      Press 'C' + Enter to continue...
+  when: creating_instances_check.stdout_lines | length > 0
+  tags:
+    - cf-db
+    - aurora
+    - database
+
+- name: Wait for Aurora instances to be available (with periodic checks)
+  shell: |
+    echo "⏳ Checking Aurora instances status..."
+    echo "Cluster: {{ cf_db_config.database.cluster_name }}"
+
+    # Check for up to 30 minutes with 1-minute intervals
+    MAX_CHECKS=30
+    CHECK_COUNT=0
+
+    while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
+      # Get all instances status
+      INSTANCES_STATUS=$(aws rds describe-db-instances \
+        --region {{ cf_db_config.region }} \
+        --filters "Name=db-cluster-id,Values={{ cf_db_config.database.cluster_name }}" \
+        --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus]' \
+        --output text)
+
+      # Count available instances
+      AVAILABLE_COUNT=$(echo "$INSTANCES_STATUS" | grep -c "available" || echo "0")
+      TOTAL_COUNT=$(echo "$INSTANCES_STATUS" | wc -l)
+
+      CURRENT_TIME=$(date "+%H:%M:%S")
+      echo "[$CURRENT_TIME] Check #$((CHECK_COUNT + 1)): $AVAILABLE_COUNT/$TOTAL_COUNT instances available"
+
+      # Show current status
+      echo "$INSTANCES_STATUS" | while read -r instance status; do
+        echo "  - $instance: $status"
+      done
+
+      # Check if all instances are available
+      if [ "$AVAILABLE_COUNT" -eq "$TOTAL_COUNT" ] && [ "$TOTAL_COUNT" -ge 2 ]; then
+        echo "✅ All Aurora instances are now available!"
+        exit 0
+      fi
+
+      # Check for failed instances
+      FAILED_COUNT=$(echo "$INSTANCES_STATUS" | grep -c "failed\|error" || echo "0")
+      if [ "$FAILED_COUNT" -gt 0 ]; then
+        echo "❌ Some Aurora instances failed to create!"
+        echo "$INSTANCES_STATUS" | grep "failed\|error"
+        exit 1
+      fi
+
+      CHECK_COUNT=$((CHECK_COUNT + 1))
+
+      if [ $CHECK_COUNT -lt $MAX_CHECKS ]; then
+        echo "Still creating... waiting 1 minute before next check ($(($MAX_CHECKS - $CHECK_COUNT)) checks remaining)"
+        sleep 60
+      fi
+    done
+
+    echo "⚠️ Timeout reached after 30 minutes. Instances may still be creating."
+    echo "Current status:"
+    echo "$INSTANCES_STATUS"
+    exit 2
+  environment:
+    AWS_PROFILE: "{{ cf_db_config.profile }}"
+  register: instances_wait_result
+  when: creating_instances_check.stdout_lines | length > 0
+  failed_when: instances_wait_result.rc == 1
+  tags:
+    - cf-db
+    - aurora
+    - database
+
 - name: Get final instance status and validate deployment
   shell: |
     aws rds describe-db-instances \

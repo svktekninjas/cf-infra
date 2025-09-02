@@ -1,0 +1,76 @@
+---
+# Development Environment Configuration for Harness Setup
+
+# Harness Platform Configuration
+harness_account_id: "B-j8Q1a6Rgm9N6et6GQ6fA"
+harness_org_id: "default"
+harness_api_token: "sat.B-j8Q1a6Rgm9N6et6GQ6fA.68afbbb92f20f0394a5e97e7.G5RkqRpOj0hAkSut4dTg"  # SAT for API access
+harness_delegate_token: "2e0a90780fb4cb912ce3c88d0c378446"  # Decoded hex token from Harness
+harness_project_id: "cf_dev_project"
+harness_base_url: "https://app.harness.io"
+
+# ROSA Cluster Configuration
+rosa_cluster_name: "rosa-cluster-dev"
+
+# AWS Configuration (required by validation)
+aws_account_id: "818140567777"
+ecr_region: "us-east-1"
+ecr_registry_url: "818140567777.dkr.ecr.us-east-1.amazonaws.com"
+
+# GitHub Configuration
+github_username: "svktekninjas"
+github_token: "REPLACE_WITH_YOUR_TOKEN"
+
+# Git Repository Configuration
+cf_monitor_repo_url: "https://github.com/svktekninjas/cf-monitor.git"
+cf_deploy_repo_url: "https://github.com/svktekninjas/cf-deploy.git"
+git_branch: "main"
+
+# Helm Chart Configuration
+cf_monitor_helm_path: "helm/cf-monitor"
+cf_deploy_helm_path: "helm/cf-deploy"
+helm_version: "V3"
+
+# Delegate Configuration (Development) - Fixed memory settings
+delegate_name: "harness-dgdev"
+delegate_replicas: 1
+delegate_cpu_request: "0.25"
+delegate_memory_request: "2Gi"
+delegate_cpu_limit: "0.5"
+delegate_memory_limit: "2Gi"
+delegate_jvm_memory: "64M"
+
+# Environment Overrides for Development
+environments:
+  - name: "development"
+    identifier: "development"
+    type: "PreProduction"
+    description: "Development environment for CF workloads"
+
+# Resource Limits (Development)
+default_cpu_request: "50m"
+default_memory_request: "64Mi"
+default_cpu_limit: "200m"
+default_memory_limit: "256Mi"
+
+# Pipeline Configuration (Development)
+pipeline_timeout: "5m"
+health_check_timeout: "2m"
+rollback_timeout: "2m"
+
+# Monitoring Configuration (Development)
+enable_monitoring: false
+enable_notifications: false
+
+# Git Configuration (Development)
+git_branch: "main"
+
+# Security Configuration (Development)
+secret_scope: "PROJECT"
+
+# Development-specific tags
+common_tags:
+  environment: "development"
+  managed_by: "ansible"
+  cost_center: "development"
+  project: "cf-workloads"
